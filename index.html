@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+>
+
+<title>RoadGame</title>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.min.js"></script>
+
+<style>
+
+* {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+
+    margin: 0;
+    padding: 0;
+
+    width: 100%;
+    height: 100%;
+
+    overflow: hidden;
+
+    background: #87ceeb;
+
+    font-family: Arial, sans-serif;
+
+    touch-action: none;
+}
+
+
+/* =====================================================
+   JEU
+===================================================== */
+
+#game {
+
+    position: fixed;
+
+    inset: 0;
+
+    width: 100%;
+    height: 100%;
+
+    overflow: hidden;
+}
+
+#game canvas {
+
+    position: absolute;
+
+    inset: 0;
+
+    width: 100% !important;
+    height: 100% !important;
+
+    display: block;
+}
+
+
+/* =====================================================
+   MENU PRINCIPAL
+===================================================== */
+
+#menu {
+
+    position: fixed;
+
+    z-index: 100;
+
+    left: 50%;
+    top: 50%;
+
+    transform:
+        translate(-50%, -50%);
+
+    width: min(90%, 420px);
+
+    padding: 25px;
+
+    border-radius: 24px;
+
+    background:
+        rgba(12, 16, 24, 0.94);
+
+    color: white;
+
+    text-align: center;
+
+    box-shadow:
+        0 15px 50px
+        rgba(0,0,0,0.55);
+}
+
+#menu h1 {
+
+    margin: 0 0 8px;
+
+    font-size: 36px;
+}
+
+#menu p {
+
+    color: #bbb;
+
+    margin-bottom: 18px;
+}
+
+
+#location {
+
+    width: 100%;
+
+    padding: 14px;
+
+    border: none;
+
+    outline: none;
+
+    border-radius: 13px;
+
+    font-size: 16px;
+
+    margin-bottom: 10px;
+}
+
+
+.menuButton {
+
+    width: 100%;
+
+    padding: 14px;
+
+    margin-top: 8px;
+
+    border: none;
+
+    border-radius: 13px;
+
+    background: #2878ff;
+
+    color: white;
+
+    font-size: 17px;
+
+    font-weight: bold;
+
+    transition:
+        transform .1s,
+        opacity .1s;
+}
+
+.menuButton:active {
+
+    transform: scale(.96);
+
+    opacity: .8;
+}
+
+
+#message {
+
+    min-height: 22px;
+
+    margin-top: 12px;
+
+    font-size: 14px;
+
+    color: #ddd;
+}
+
+
+/* =====================================================
+   HUD
+===================================================== */
+
+#hud {
+
+    position: fixed;
+
+    z-index: 20;
+
+    left: 12px;
+    top: 12px;
+
+    display: none;
+
+    color: white;
+}
+
+#locationName {
+
+    display: inline-block;
+
+    padding: 10px 14px;
+
+    border-radius: 12px;
+
+    background:
+        rgba(0,0,0,.65);
+
+    font-size: 14px;
+}
+
+
+/* =====================================================
+   BOUTON SETTINGS
+===================================================== */
+
+#settingsButton {
+
+    position: fixed;
+
+    z-index: 50;
+
+    right: 15px;
+    top: 15px;
+
+    display: none;
+
+    width: 50px;
+    height: 50px;
+
+    border: none;
+
+    border-radius: 50%;
+
+    background:
+        rgba(0,0,0,.7);
+
+    color: white;
+
+    font-size: 23px;
+}
+
+
+/* =====================================================
+   PARAMÈTRES
+===================================================== */
+
+#settings {
+
+    position: fixed;
+
+    z-index: 200;
+
+    left: 50%;
+    top: 50%;
+
+    transform:
+        translate(-50%, -50%);
+
+    display: none;
+
+    width: min(90%, 330px);
+
+    padding: 20px;
+
+    border-radius: 20px;
+
+    background:
+        rgba(12,16,24,.97);
+
+    color: white;
+
+    box-shadow:
+        0 15px 50px
+        rgba(0,0,0,.6);
+}
+
+#settings h2 {
+
+    margin-top: 0;
+
+    text-align: center;
+}
+
+
+.settingButton {
+
+    width: 100%;
+
+    padding: 12px;
+
+    margin-top: 8px;
+
+    border: none;
+
+    border-radius: 11px;
+
+    background: #333;
+
+    color: white;
+
+    font-size: 15px;
+}
+
+.settingButton:active {
+
+    transform: scale(.97);
+}
+
+
+#closeSettings {
+
+    background: #d73737;
+
+    margin-top: 15px;
+}
+
+
+/* =====================================================
+   CONTRÔLES
+===================================================== */
+
+#mobileControls {
+
+    position: fixed;
+
+    z-index: 40;
+
+    left: 15px;
+    bottom: 20px;
+
+    width: 170px;
+
+    text-align: center;
+
+    user-select: none;
+}
+
+#mobileControls button {
+
+    width: 52px;
+    height: 52px;
+
+    margin: 3px;
+
+    border: none;
+
+    border-radius: 15px;
+
+    background:
+        rgba(0,0,0,.68);
+
+    color: white;
+
+    font-size: 21px;
+
+    font-weight: bold;
+
+    box-shadow:
+        0 4px 12px
+        rgba(0,0,0,.25);
+}
+
+#mobileControls button:active {
+
+    background:
+        rgba(40,120,255,.95);
+
+    transform: scale(.9);
+}
+
+
+/* =====================================================
+   VÉHICULES
+===================================================== */
+
+#vehiclePanel {
+
+    position: fixed;
+
+    z-index: 40;
+
+    right: 15px;
+    bottom: 20px;
+
+    display: none;
+
+    width: 165px;
+
+    padding: 10px;
+
+    border-radius: 16px;
+
+    background:
+        rgba(0,0,0,.72);
+
+    backdrop-filter:
+        blur(5px);
+}
+
+#vehiclePanel button {
+
+    width: 100%;
+
+    padding: 10px;
+
+    margin: 4px 0;
+
+    border: none;
+
+    border-radius: 10px;
+
+    background: #333;
+
+    color: white;
+
+    font-size: 14px;
+}
+
+#vehiclePanel button:active {
+
+    background: #2878ff;
+}
+
+
+/* =====================================================
+   MULTIJOUEUR
+===================================================== */
+
+#multiplayerUI {
+
+    position: fixed;
+
+    z-index: 150;
+
+    left: 50%;
+    top: 20px;
+
+    transform:
+        translateX(-50%);
+
+    width: min(92%, 360px);
+
+    padding: 15px;
+
+    border-radius: 18px;
+
+    background:
+        rgba(10,12,18,.93);
+
+    color: white;
+
+    text-align: center;
+
+    box-shadow:
+        0 10px 35px
+        rgba(0,0,0,.45);
+}
+
+#multiplayerUI button {
+
+    width: 100%;
+
+    padding: 12px;
+
+    margin-top: 7px;
+
+    border: none;
+
+    border-radius: 10px;
+
+    background: #2878ff;
+
+    color: white;
+
+    font-weight: bold;
+}
+
+#mpStatus {
+
+    margin-bottom: 8px;
+
+    font-weight: bold;
+}
+
+#mpRoom {
+
+    margin-top: 10px;
+
+    padding: 10px;
+
+    border-radius: 10px;
+
+    background: #222;
+}
+
+#mpPlayers {
+
+    margin-top: 8px;
+
+    color: #ccc;
+}
+
+
+/* =====================================================
+   PETITS ÉCRANS
+===================================================== */
+
+@media (max-width: 500px) {
+
+    #menu {
+
+        padding: 20px;
+
+        width: 92%;
+    }
+
+    #menu h1 {
+
+        font-size: 30px;
+    }
+
+    #mobileControls {
+
+        left: 5px;
+        bottom: 12px;
+    }
+
+    #vehiclePanel {
+
+        right: 8px;
+        bottom: 12px;
+    }
+}
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<!-- =====================================================
+     JEU 3D
+===================================================== -->
+
+<div id="game"></div>
+
+
+<!-- =====================================================
+     MENU
+===================================================== -->
+
+<div id="menu">
+
+    <h1>🚗 RoadGame</h1>
+
+    <p>
+        Explore une ville en 3D
+    </p>
+
+    <input
+        id="location"
+        type="text"
+        placeholder="Ville ou adresse..."
+        autocomplete="off"
+    >
+
+    <button
+        id="play"
+        class="menuButton"
+    >
+        ▶️ Jouer
+    </button>
+
+    <button
+        id="multiplayerMenu"
+        class="menuButton"
+    >
+        🌐 Multijoueur
+    </button>
+
+    <button
+        id="vehicleMenu"
+        class="menuButton"
+    >
+        🚗 Choisir un véhicule
+    </button>
+
+    <button
+        id="settingsMenu"
+        class="menuButton"
+    >
+        ⚙️ Paramètres
+    </button>
+
+    <div id="message"></div>
+
+</div>
+
+
+<!-- =====================================================
+     HUD
+===================================================== -->
+
+<div id="hud">
+
+    <div id="locationName">
+        📍 Aucune destination
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     SETTINGS
+===================================================== -->
+
+<button id="settingsButton">
+    ⚙️
+</button>
+
+
+<div id="settings">
+
+    <h2>⚙️ Graphismes</h2>
+
+    <button
+        class="settingButton"
+        data-quality="low"
+    >
+        🟢 Faible
+    </button>
+
+    <button
+        class="settingButton"
+        data-quality="medium"
+    >
+        🟡 Moyen
+    </button>
+
+    <button
+        class="settingButton"
+        data-quality="high"
+    >
+        🔴 Élevé
+    </button>
+
+    <button
+        class="settingButton"
+        data-quality="ultra"
+    >
+        💎 Ultra
+    </button>
+
+    <button
+        id="closeSettings"
+        class="settingButton"
+    >
+        Fermer
+    </button>
+
+</div>
+
+
+<!-- =====================================================
+     VÉHICULES
+===================================================== -->
+
+<div id="vehiclePanel">
+
+    <button data-vehicle="walk">
+        🚶 Personnage
+    </button>
+
+    <button data-vehicle="car">
+        🚗 Voiture
+    </button>
+
+    <button data-vehicle="truck">
+        🚛 Camion
+    </button>
+
+    <button data-vehicle="bus">
+        🚌 Bus
+    </button>
+
+    <button data-vehicle="plane">
+        ✈️ Avion
+    </button>
+
+    <button data-vehicle="boat">
+        🚤 Bateau
+    </button>
+
+</div>
+
+
+<!-- =====================================================
+     CONTRÔLES
+===================================================== -->
+
+<div id="mobileControls">
+
+    <button data-direction="up">
+        ▲
+    </button>
+
+    <br>
+
+    <button data-direction="left">
+        ◀
+    </button>
+
+    <button data-direction="down">
+        ▼
+    </button>
+
+    <button data-direction="right">
+        ▶
+    </button>
+
+</div>
+
+
+<!-- =====================================================
+     GAME.JS
+===================================================== -->
+
+<script src="game.js"></script>
+
+
+<!-- =====================================================
+     INTERFACE
+===================================================== -->
+
+<script>
+
+const menu =
+    document.getElementById("menu");
+
+const play =
+    document.getElementById("play");
+
+const locationInput =
+    document.getElementById("location");
+
+const message =
+    document.getElementById("message");
+
+const hud =
+    document.getElementById("hud");
+
+const locationName =
+    document.getElementById("locationName");
+
+const settings =
+    document.getElementById("settings");
+
+const settingsButton =
+    document.getElementById("settingsButton");
+
+const settingsMenu =
+    document.getElementById("settingsMenu");
+
+const closeSettings =
+    document.getElementById("closeSettings");
+
+const vehicleMenu =
+    document.getElementById("vehicleMenu");
+
+const vehiclePanel =
+    document.getElementById("vehiclePanel");
+
+const multiplayerMenu =
+    document.getElementById("multiplayerMenu");
+
+
+/* =====================================================
+   JOUER
+===================================================== */
+
+play.addEventListener(
+    "click",
+    function() {
+
+        const location =
+            locationInput.value.trim();
+
+        if (!location) {
+
+            message.textContent =
+                "❌ Écris une ville ou une adresse.";
+
+            return;
+        }
+
+        locationName.textContent =
+            "📍 " + location;
+
+        message.textContent =
+            "";
+
+        menu.style.display =
+            "none";
+
+        hud.style.display =
+            "block";
+
+        settingsButton.style.display =
+            "block";
+
+        vehiclePanel.style.display =
+            "block";
+
+
+        if (
+            typeof window.startGame ===
+            "function"
+        ) {
+
+            window.startGame(
+                location
+            );
+        }
+
+    }
+);
+
+
+/* =====================================================
+   PARAMÈTRES
+===================================================== */
+
+settingsMenu.addEventListener(
+    "click",
+    function() {
+
+        settings.style.display =
+            "block";
+
+    }
+);
+
+
+settingsButton.addEventListener(
+    "click",
+    function() {
+
+        settings.style.display =
+            "block";
+
+    }
+);
+
+
+closeSettings.addEventListener(
+    "click",
+    function() {
+
+        settings.style.display =
+            "none";
+
+    }
+);
+
+
+/* =====================================================
+   GRAPHISMES
+===================================================== */
+
+document
+.querySelectorAll("[data-quality]")
+.forEach(
+    button => {
+
+        button.addEventListener(
+            "click",
+            function() {
+
+                const quality =
+                    this.dataset.quality;
+
+                localStorage.setItem(
+                    "roadgame-quality",
+                    quality
+                );
+
+
+                if (
+                    typeof window.setGraphicsQuality ===
+                    "function"
+                ) {
+
+                    window.setGraphicsQuality(
+                        quality
+                    );
+                }
+
+
+                message.textContent =
+                    "🎮 Graphismes : " +
+                    quality;
+
+
+                settings.style.display =
+                    "none";
+
+            }
+        );
+
+    }
+);
+
+
+/* =====================================================
+   VÉHICULE
+===================================================== */
+
+vehicleMenu.addEventListener(
+    "click",
+    function() {
+
+        if (
+            vehiclePanel.style.display ===
+            "block"
+        ) {
+
+            vehiclePanel.style.display =
+                "none";
+
+        }
+
+        else {
+
+            vehiclePanel.style.display =
+                "block";
+        }
+
+    }
+);
+
+
+document
+.querySelectorAll("[data-vehicle]")
+.forEach(
+    button => {
+
+        button.addEventListener(
+            "click",
+            function() {
+
+                const vehicle =
+                    this.dataset.vehicle;
+
+
+                if (
+                    typeof window.changeVehicle ===
+                    "function"
+                ) {
+
+                    window.changeVehicle(
+                        vehicle
+                    );
+                }
+
+
+                message.textContent =
+                    "🚗 Véhicule sélectionné";
+
+
+                vehiclePanel.style.display =
+                    "none";
+
+            }
+        );
+
+    }
+);
+
+
+/* =====================================================
+   MULTIJOUEUR
+===================================================== */
+
+multiplayerMenu.addEventListener(
+    "click",
+    function() {
+
+        menu.style.display =
+            "none";
+
+
+        const multiplayer =
+            document.getElementById(
+                "multiplayerUI"
+            );
+
+
+        if (multiplayer) {
+
+            multiplayer.style.display =
+                "block";
+
+        }
+
+        else {
+
+            message.textContent =
+                "🌐 Interface multijoueur en chargement...";
+
+            setTimeout(
+                function() {
+
+                    const mp =
+                        document.getElementById(
+                            "multiplayerUI"
+                        );
+
+                    if (mp) {
+
+                        mp.style.display =
+                            "block";
+                    }
+
+                },
+                300
+            );
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+   EMPÊCHER LE ZOOM
+===================================================== */
+
+document.addEventListener(
+    "gesturestart",
+    function(event) {
+
+        event.preventDefault();
+
+    }
+);
+
+</script>
+
+<script>
+console.log("Three.js :", typeof THREE);
+
+if (typeof THREE === "undefined") {
+    document.body.innerHTML = `
+        <div style="
+            position:fixed;
+            inset:0;
+            background:#111;
+            color:white;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
+            font-family:Arial;
+            padding:30px;
+        ">
+            <div>
+                <h1>❌ Three.js ne se charge pas</h1>
+                <p>Koder n'arrive pas à charger la bibliothèque 3D.</p>
+            </div>
+        </div>
+    `;
+}
+</script>
+
+</body>
+
+</html>
