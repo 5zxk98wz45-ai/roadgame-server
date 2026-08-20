@@ -1,180 +1,246 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-    <title>RoadGame 3D</title>
+<title>RoadGame</title>
 
-    <style>
-        * {
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-        }
+<style>
+* {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
 
-        html, body {
-            margin: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background: #87ceeb;
-            font-family: Arial, sans-serif;
-            touch-action: none;
-        }
+html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #75bff0;
+    font-family: Arial, sans-serif;
+    touch-action: none;
+}
 
-        #game {
-            position: fixed;
-            inset: 0;
-        }
+#game {
+    position: fixed;
+    inset: 0;
+}
 
-        #menu {
-            position: fixed;
-            z-index: 10;
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            width: min(90%, 420px);
-            padding: 25px;
-            border-radius: 22px;
-            background: rgba(15,15,20,.94);
-            color: white;
-            text-align: center;
-            box-shadow: 0 15px 50px rgba(0,0,0,.45);
-        }
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
 
-        #menu h1 {
-            margin: 0 0 10px;
-            font-size: 34px;
-        }
+button {
+    cursor: pointer;
+}
 
-        #location {
-            width: 100%;
-            padding: 14px;
-            border: 0;
-            border-radius: 12px;
-            font-size: 16px;
-            outline: none;
-            margin: 10px 0;
-        }
+#menu {
+    position: fixed;
+    z-index: 50;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(90%, 400px);
+    padding: 25px;
+    border-radius: 22px;
+    background: rgba(15,15,20,.94);
+    color: white;
+    text-align: center;
+    box-shadow: 0 15px 50px rgba(0,0,0,.5);
+}
 
-        .button {
-            width: 100%;
-            padding: 14px;
-            margin-top: 8px;
-            border: 0;
-            border-radius: 12px;
-            background: #2878ff;
-            color: white;
-            font-size: 17px;
-            font-weight: bold;
-        }
+#menu h1 {
+    margin: 0 0 8px;
+    font-size: 34px;
+}
 
-        #message {
-            min-height: 22px;
-            margin-top: 12px;
-            font-size: 14px;
-        }
+#location {
+    width: 100%;
+    padding: 14px;
+    margin: 10px 0;
+    border: 0;
+    border-radius: 12px;
+    font-size: 16px;
+    outline: none;
+}
 
-        #hud {
-            display: none;
-            position: fixed;
-            z-index: 5;
-            top: 12px;
-            left: 12px;
-            right: 12px;
-            color: white;
-        }
+.menuButton {
+    width: 100%;
+    padding: 14px;
+    margin-top: 8px;
+    border: 0;
+    border-radius: 12px;
+    background: #2878ff;
+    color: white;
+    font-size: 17px;
+    font-weight: bold;
+}
 
-        #info {
-            display: inline-block;
-            padding: 10px 14px;
-            border-radius: 12px;
-            background: rgba(0,0,0,.65);
-        }
+#message {
+    min-height: 22px;
+    margin-top: 12px;
+}
 
-        #cameraButtons {
-            position: fixed;
-            z-index: 6;
-            right: 15px;
-            top: 15px;
-            display: none;
-        }
+#hud {
+    position: fixed;
+    z-index: 20;
+    left: 12px;
+    top: 12px;
+    display: none;
+}
 
-        #cameraButtons button {
-            width: 48px;
-            height: 48px;
-            border: 0;
-            border-radius: 50%;
-            margin: 3px;
-            background: rgba(0,0,0,.7);
-            color: white;
-            font-size: 20px;
-        }
+#info {
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(0,0,0,.7);
+    color: white;
+}
 
-        #controls {
-            position: fixed;
-            z-index: 6;
-            left: 15px;
-            bottom: 20px;
-            display: none;
-            width: 170px;
-            text-align: center;
-        }
+#cameraControls {
+    position: fixed;
+    z-index: 20;
+    right: 12px;
+    top: 12px;
+    display: none;
+}
 
-        #controls button {
-            width: 52px;
-            height: 52px;
-            margin: 3px;
-            border: 0;
-            border-radius: 14px;
-            background: rgba(0,0,0,.7);
-            color: white;
-            font-size: 21px;
-            font-weight: bold;
-        }
+#cameraControls button {
+    width: 48px;
+    height: 48px;
+    margin-left: 5px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0,0,0,.7);
+    color: white;
+    font-size: 22px;
+}
 
-        #vehicle {
-            position: fixed;
-            z-index: 6;
-            right: 15px;
-            bottom: 20px;
-            display: none;
-        }
+#controls {
+    position: fixed;
+    z-index: 20;
+    left: 12px;
+    bottom: 18px;
+    width: 175px;
+    display: none;
+    text-align: center;
+}
 
-        #vehicle button {
-            display: block;
-            width: 140px;
-            padding: 10px;
-            margin: 4px;
-            border: 0;
-            border-radius: 10px;
-            background: rgba(0,0,0,.75);
-            color: white;
-        }
+#controls button {
+    width: 52px;
+    height: 52px;
+    margin: 3px;
+    border: 0;
+    border-radius: 14px;
+    background: rgba(0,0,0,.72);
+    color: white;
+    font-size: 21px;
+    font-weight: bold;
+}
 
-        #loading {
-            display: none;
-            position: fixed;
-            z-index: 20;
-            inset: 0;
-            background: rgba(0,0,0,.75);
-            color: white;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            font-size: 20px;
-        }
+#vehiclePanel {
+    position: fixed;
+    z-index: 20;
+    right: 12px;
+    bottom: 18px;
+    width: 145px;
+    display: none;
+}
 
-        @media(max-width:500px) {
-            #menu {
-                padding: 20px;
-            }
+#vehiclePanel button {
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+    border: 0;
+    border-radius: 10px;
+    background: rgba(0,0,0,.72);
+    color: white;
+}
 
-            #menu h1 {
-                font-size: 28px;
-            }
-        }
-    </style>
+#multiplayerUI {
+    position: fixed;
+    z-index: 100;
+    left: 50%;
+    top: 20px;
+    transform: translateX(-50%);
+    width: min(92%, 350px);
+    padding: 15px;
+    border-radius: 18px;
+    background: rgba(10,10,15,.94);
+    color: white;
+    display: none;
+    text-align: center;
+}
+
+#multiplayerUI button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 7px;
+    border: 0;
+    border-radius: 10px;
+    background: #2878ff;
+    color: white;
+    font-weight: bold;
+}
+
+#mpClose {
+    background: #444 !important;
+}
+
+#mpStatus {
+    margin-bottom: 8px;
+}
+
+#mpRoom {
+    display: none;
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 10px;
+    background: #222;
+}
+
+#mpPlayers {
+    margin-top: 10px;
+}
+
+#openMP {
+    position: fixed;
+    z-index: 30;
+    right: 12px;
+    top: 70px;
+    display: none;
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 12px;
+    background: rgba(0,0,0,.7);
+    color: white;
+}
+
+#loading {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,.75);
+    color: white;
+    text-align: center;
+    font-size: 20px;
+}
+
+@media(max-width:500px) {
+    #menu {
+        padding: 20px;
+    }
+
+    #menu h1 {
+        font-size: 28px;
+    }
+}
+</style>
 </head>
 
 <body>
@@ -183,15 +249,14 @@
 
 <div id="loading">
     <div>
-        🗺️ Génération de la ville...<br><br>
-        <small>Construction de la route et des bâtiments</small>
+        🗺️ Génération de la map...<br><br>
+        <small>Création de la ville 3D</small>
     </div>
 </div>
 
 <div id="menu">
     <h1>🚗 RoadGame</h1>
-
-    <p>Entre une ville ou une adresse</p>
+    <p>Choisis une ville ou une adresse</p>
 
     <input
         id="location"
@@ -200,40 +265,75 @@
         autocomplete="off"
     >
 
-    <button id="play" class="button">
-        ▶️ Générer la map
+    <button id="play" class="menuButton">
+        ▶️ Jouer
+    </button>
+
+    <button id="openMultiplayer" class="menuButton">
+        🌐 Multijoueur
     </button>
 
     <div id="message"></div>
 </div>
 
 <div id="hud">
-    <div id="info">📍 RoadGame 3D</div>
+    <div id="info">📍 RoadGame</div>
 </div>
 
-<div id="cameraButtons">
-    <button id="leftCamera">↶</button>
-    <button id="rightCamera">↷</button>
+<div id="cameraControls">
+    <button id="camLeft">↶</button>
+    <button id="camRight">↷</button>
 </div>
 
 <div id="controls">
-    <button data-move="forward">▲</button>
+    <button data-control="forward">▲</button>
     <br>
-    <button data-move="left">◀</button>
-    <button data-move="back">▼</button>
-    <button data-move="right">▶</button>
+    <button data-control="left">◀</button>
+    <button data-control="back">▼</button>
+    <button data-control="right">▶</button>
 </div>
 
-<div id="vehicle">
-    <button data-car="car">🚗 Voiture</button>
-    <button data-car="truck">🚛 Camion</button>
-    <button data-car="bus">🚌 Bus</button>
+<div id="vehiclePanel">
+    <button data-vehicle="car">🚗 Voiture</button>
+    <button data-vehicle="truck">🚛 Camion</button>
+    <button data-vehicle="bus">🚌 Bus</button>
+</div>
+
+<button id="openMP">
+    🌐 Multijoueur
+</button>
+
+<div id="multiplayerUI">
+
+    <div id="mpStatus">
+        🔴 Hors ligne
+    </div>
+
+    <button id="mpCreate">
+        ➕ Créer une partie
+    </button>
+
+    <button id="mpJoin">
+        🔗 Rejoindre une partie
+    </button>
+
+    <div id="mpRoom">
+        Code : <strong id="mpRoomCode"></strong>
+    </div>
+
+    <div id="mpPlayers">
+        👥 Joueurs : 1
+    </div>
+
+    <button id="mpClose">
+        Fermer
+    </button>
 </div>
 
 <!-- Three.js -->
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 
-<!-- Ton jeu -->
+<!-- Jeu -->
 <script src="game.js"></script>
 
 </body>
