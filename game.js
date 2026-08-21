@@ -1,38 +1,25 @@
 /* =========================================================
    ROADGAME - GAME.JS V2
    =========================================================
-
-   Fonctionnalités :
-   - Écran de chargement
-   - Barre de progression
-   - Connexion WebSocket
-   - Reconnexion automatique
+   - Écran de chargement 🚗 rouge
+   - Barre de progression + %
+   - Connexion serveur
    - Comptes
-   - Connexion
-   - Partie rapide
-   - Parties publiques
-   - Parties privées
-   - Mot de passe
    - Multijoueur
-   - Synchronisation des joueurs
+   - Partie rapide
+   - Serveurs privés
    - Véhicules
-   - Entrer / sortir du véhicule
-   - Détection de proximité véhicule
+   - Entrée / sortie véhicule
    - Garage
-   - Magasin
    - Amis
-   - Demandes d'amis
    - Paramètres
-   - Changement de pseudo
    - Carte
-   - Contrôles tactiles
-   - Clavier
-   - Three.js
+   - Contrôles clavier + tactiles
    ========================================================= */
 
 
 /* =========================================================
-   CONFIGURATION
+   CONFIG
    ========================================================= */
 
 const SERVER_URL =
@@ -41,61 +28,30 @@ const SERVER_URL =
         : "ws://localhost:10000";
 
 
-const THREE_URL =
-    "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js";
-
-
 /* =========================================================
-   ÉTAT GLOBAL
+   ÉTAT
    ========================================================= */
 
-let THREE = null;
-
 let socket = null;
-
 let connected = false;
 
-let connecting = false;
-
-let reconnectTimer = null;
-
-let reconnectDelay = 2000;
-
 let currentUser = null;
-
 let currentRoom = null;
-
 let currentPlayerId = null;
 
 let isPlaying = false;
-
 let isPaused = false;
 
-let roomPlayers = [];
-
-let lastPositionSend = 0;
-
-
-/* =========================================================
-   THREE.JS
-   ========================================================= */
+let THREE = null;
 
 let scene = null;
-
 let camera = null;
-
 let renderer = null;
-
 let clock = null;
 
 let localPlayer = null;
 
 const remotePlayers = new Map();
-
-
-/* =========================================================
-   POSITION DU JOUEUR
-   ========================================================= */
 
 let playerPosition = {
     x: 0,
@@ -103,6 +59,10 @@ let playerPosition = {
 };
 
 let playerRotation = 0;
+
+let selectedVehicle = "car";
+let currentVehicle = "car";
+let inVehicle = true;
 
 
 /* =========================================================
@@ -113,54 +73,35 @@ const VEHICLES = {
 
     walk: {
         name: "À pied",
-        icon: "🚶",
-        speed: 7,
-        price: 0
+        icon: "🚶"
     },
 
     car: {
         name: "Voiture",
-        icon: "🚗",
-        speed: 18,
-        price: 0
+        icon: "🚗"
     },
 
     truck: {
         name: "Camion",
-        icon: "🚚",
-        speed: 13,
-        price: 500
+        icon: "🚚"
     },
 
     bus: {
         name: "Bus",
-        icon: "🚌",
-        speed: 11,
-        price: 750
+        icon: "🚌"
     },
 
     plane: {
         name: "Avion",
-        icon: "✈️",
-        speed: 30,
-        price: 1500
+        icon: "✈️"
     },
 
     boat: {
         name: "Bateau",
-        icon: "🚤",
-        speed: 12,
-        price: 1000
+        icon: "🚤"
     }
 
 };
-
-
-let selectedVehicle = "car";
-
-let currentVehicle = "car";
-
-let inVehicle = true;
 
 
 /* =========================================================
@@ -168,33 +109,148 @@ let inVehicle = true;
    ========================================================= */
 
 const controls = {
-
     forward: false,
     backward: false,
     left: false,
     right: false
-
 };
 
-
 let joystickActive = false;
-
 let joystickTouchId = null;
-
 let joystickX = 0;
-
 let joystickY = 0;
 
 
 /* =========================================================
-   VÉHICULE À PROXIMITÉ
+   CHARGEMENT
    ========================================================= */
 
-let nearbyVehicle = false;
+const loadingState = {
+    progress: 0,
+    status: "Démarrage de RoadGame..."
+};
 
-let nearbyVehicleId = null;
 
-const INTERACTION_DISTANCE = 5;
+function updateLoading(
+    progress,
+    status
+) {
+
+    loadingState.progress =
+        Math.max(
+            0,
+            Math.min(
+                100,
+                progress
+            )
+        );
+
+    loadingState.status =
+        status;
+
+
+    const bar =
+        document.getElementById(
+            "loadingProgress"
+        );
+
+    const percentage =
+        document.getElementById(
+            "loadingPercentage"
+        );
+
+    const statusText =
+        document.getElementById(
+            "loadingStatus"
+        );
+
+    const loadingScreen =
+        document.getElementById(
+            "loadingScreen"
+        );
+
+
+    if (bar) {
+
+        bar.style.width =
+            loadingState.progress + "%";
+
+    }
+
+
+    if (percentage) {
+
+        percentage.textContent =
+            Math.round(
+                loadingState.progress
+            ) + "%";
+
+    }
+
+
+    if (statusText) {
+
+        statusText.textContent =
+            loadingState.status;
+
+    }
+
+
+    if (loadingScreen) {
+
+        loadingScreen.classList.remove(
+            "hidden"
+        );
+
+    }
+
+}
+
+
+function hideLoadingScreen() {
+
+    updateLoading(
+        100,
+        "RoadGame est prêt !"
+    );
+
+
+    setTimeout(
+        () => {
+
+            const screen =
+                document.getElementById(
+                    "loadingScreen"
+                );
+
+            if (screen) {
+
+                screen.classList.add(
+                    "hidden"
+                );
+
+            }
+
+        },
+        500
+    );
+
+}
+
+
+async function wait(
+    milliseconds
+) {
+
+    return new Promise(
+        resolve =>
+            setTimeout(
+                resolve,
+                milliseconds
+            )
+    );
+
+}
 
 
 /* =========================================================
@@ -205,35 +261,37 @@ document.addEventListener(
     "DOMContentLoaded",
     async () => {
 
-        createLoadingScreen();
-
         updateLoading(
             5,
-            "Initialisation de RoadGame..."
+            "Démarrage de RoadGame..."
         );
 
         await wait(150);
 
-        setupButtons();
-
         updateLoading(
             15,
-            "Initialisation des contrôles..."
+            "Préparation de l'interface..."
         );
+
+        setupButtons();
 
         setupKeyboard();
 
         setupTouchControls();
 
+        await wait(150);
+
         updateLoading(
-            25,
+            30,
             "Connexion au serveur..."
         );
 
         connectWebSocket();
 
+        await wait(250);
+
         updateLoading(
-            40,
+            45,
             "Chargement du moteur 3D..."
         );
 
@@ -241,379 +299,38 @@ document.addEventListener(
 
         updateLoading(
             65,
-            "Création de la ville..."
+            "Création du monde..."
         );
 
         initThree();
 
+        await wait(250);
+
         updateLoading(
-            82,
-            "Préparation du multijoueur..."
+            80,
+            "Préparation des véhicules..."
         );
 
-        await wait(300);
+        await wait(200);
 
         updateLoading(
-            94,
+            92,
             "Préparation de l'interface..."
         );
 
-        await wait(300);
+        showAuthScreen();
+
+        await wait(250);
 
         updateLoading(
             100,
             "RoadGame est prêt !"
         );
 
-        await wait(500);
-
         hideLoadingScreen();
-
-        showAuthScreen();
 
     }
 );
-
-
-/* =========================================================
-   ÉCRAN DE CHARGEMENT
-   ========================================================= */
-
-function createLoadingScreen() {
-
-    if (
-        document.getElementById(
-            "roadgameLoading"
-        )
-    ) {
-        return;
-    }
-
-
-    const loading =
-        document.createElement(
-            "div"
-        );
-
-
-    loading.id =
-        "roadgameLoading";
-
-
-    loading.innerHTML = `
-
-        <div class="roadgameLoadingBox">
-
-            <div class="roadgameLoadingTitle">
-                ROADGAME
-            </div>
-
-            <div class="roadgameLoadingSubtitle">
-                MULTIPLAYER
-            </div>
-
-            <div class="roadgameLoadingBar">
-
-                <div
-                    id="roadgameLoadingProgress"
-                    class="roadgameLoadingProgress"
-                ></div>
-
-            </div>
-
-            <div
-                id="roadgameLoadingPercent"
-                class="roadgameLoadingPercent"
-            >
-                0%
-            </div>
-
-            <div
-                id="roadgameLoadingStatus"
-                class="roadgameLoadingStatus"
-            >
-                Initialisation...
-            </div>
-
-        </div>
-
-    `;
-
-
-    document.body.appendChild(
-        loading
-    );
-
-
-    const style =
-        document.createElement(
-            "style"
-        );
-
-
-    style.id =
-        "roadgameLoadingStyle";
-
-
-    style.textContent = `
-
-        #roadgameLoading {
-
-            position: fixed;
-
-            inset: 0;
-
-            z-index: 999999;
-
-            display: flex;
-
-            align-items: center;
-
-            justify-content: center;
-
-            background:
-                linear-gradient(
-                    135deg,
-                    #101010,
-                    #181818
-                );
-
-            color: white;
-
-            font-family:
-                Arial,
-                sans-serif;
-
-            transition:
-                opacity
-                0.45s
-                ease;
-
-        }
-
-
-        .roadgameLoadingBox {
-
-            width:
-                min(
-                    85vw,
-                    430px
-                );
-
-            text-align:
-                center;
-
-        }
-
-
-        .roadgameLoadingTitle {
-
-            font-size:
-                44px;
-
-            font-weight:
-                900;
-
-            letter-spacing:
-                5px;
-
-        }
-
-
-        .roadgameLoadingSubtitle {
-
-            margin-top:
-                6px;
-
-            margin-bottom:
-                38px;
-
-            font-size:
-                12px;
-
-            letter-spacing:
-                6px;
-
-            opacity:
-                0.5;
-
-        }
-
-
-        .roadgameLoadingBar {
-
-            width:
-                100%;
-
-            height:
-                10px;
-
-            background:
-                #333;
-
-            border-radius:
-                20px;
-
-            overflow:
-                hidden;
-
-        }
-
-
-        .roadgameLoadingProgress {
-
-            width:
-                0%;
-
-            height:
-                100%;
-
-            background:
-                #1683ff;
-
-            border-radius:
-                20px;
-
-            transition:
-                width
-                0.25s
-                ease;
-
-        }
-
-
-        .roadgameLoadingPercent {
-
-            margin-top:
-                14px;
-
-            font-size:
-                22px;
-
-            font-weight:
-                bold;
-
-        }
-
-
-        .roadgameLoadingStatus {
-
-            margin-top:
-                10px;
-
-            font-size:
-                14px;
-
-            opacity:
-                0.7;
-
-            min-height:
-                20px;
-
-        }
-
-    `;
-
-
-    document.head.appendChild(
-        style
-    );
-
-}
-
-
-function updateLoading(
-    percent,
-    status
-) {
-
-    const progress =
-        document.getElementById(
-            "roadgameLoadingProgress"
-        );
-
-
-    const percentText =
-        document.getElementById(
-            "roadgameLoadingPercent"
-        );
-
-
-    const statusText =
-        document.getElementById(
-            "roadgameLoadingStatus"
-        );
-
-
-    if (progress) {
-
-        progress.style.width =
-            `${percent}%`;
-
-    }
-
-
-    if (percentText) {
-
-        percentText.textContent =
-            `${percent}%`;
-
-    }
-
-
-    if (statusText) {
-
-        statusText.textContent =
-            status;
-
-    }
-
-}
-
-
-function hideLoadingScreen() {
-
-    const loading =
-        document.getElementById(
-            "roadgameLoading"
-        );
-
-
-    if (!loading) {
-        return;
-    }
-
-
-    loading.style.opacity =
-        "0";
-
-
-    setTimeout(
-        () => {
-
-            loading.remove();
-
-        },
-        500
-    );
-
-}
-
-
-function wait(ms) {
-
-    return new Promise(
-        resolve => {
-
-            setTimeout(
-                resolve,
-                ms
-            );
-
-        }
-    );
-
-}
 
 
 /* =========================================================
@@ -627,7 +344,7 @@ async function loadThreeJS() {
         THREE =
             window.THREE;
 
-        return true;
+        return;
 
     }
 
@@ -636,24 +353,19 @@ async function loadThreeJS() {
 
         THREE =
             await import(
-                THREE_URL
+                "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
             );
-
-        return true;
 
     } catch (error) {
 
         console.error(
-            "Three.js impossible à charger :",
+            "Erreur Three.js :",
             error
         );
 
-        updateLoading(
-            65,
-            "Erreur de chargement du moteur 3D"
+        showNotification(
+            "Impossible de charger le moteur 3D."
         );
-
-        return false;
 
     }
 
@@ -667,10 +379,7 @@ async function loadThreeJS() {
 function initThree() {
 
     if (
-        !THREE ||
-        !document.getElementById(
-            "gameCanvas"
-        )
+        !THREE
     ) {
 
         return;
@@ -682,6 +391,13 @@ function initThree() {
         document.getElementById(
             "gameCanvas"
         );
+
+
+    if (!canvas) {
+
+        return;
+
+    }
 
 
     scene =
@@ -720,7 +436,7 @@ function initThree() {
 
     renderer.setPixelRatio(
         Math.min(
-            window.devicePixelRatio || 1,
+            window.devicePixelRatio,
             2
         )
     );
@@ -755,7 +471,9 @@ function setupWorld() {
         !scene ||
         !THREE
     ) {
+
         return;
+
     }
 
 
@@ -848,7 +566,6 @@ function setupWorld() {
             1000
         );
 
-
         createRoad(
             0,
             i,
@@ -894,7 +611,7 @@ function setupWorld() {
 
 
 /* =========================================================
-   ROUTES
+   ROUTE
    ========================================================= */
 
 function createRoad(
@@ -940,7 +657,7 @@ function createRoad(
 
 
 /* =========================================================
-   BÂTIMENTS
+   BÂTIMENT
    ========================================================= */
 
 function createBuilding(
@@ -971,21 +688,17 @@ function createBuilding(
         );
 
 
-    const shade =
-        0.25 +
-        Math.random() * 0.25;
-
-
     const material =
         new THREE.MeshStandardMaterial({
-
             color:
                 new THREE.Color(
-                    shade,
-                    shade,
-                    shade
+                    0.25 +
+                    Math.random() * 0.25,
+                    0.25 +
+                    Math.random() * 0.25,
+                    0.25 +
+                    Math.random() * 0.25
                 )
-
         });
 
 
@@ -1020,7 +733,9 @@ function createLocalPlayer() {
         !THREE ||
         !scene
     ) {
+
         return;
+
     }
 
 
@@ -1058,7 +773,7 @@ function createLocalPlayer() {
 
 
 /* =========================================================
-   OBJET VÉHICULE
+   CRÉER VÉHICULE
    ========================================================= */
 
 function createVehicleObject(
@@ -1204,78 +919,6 @@ function createVehicleObject(
     }
 
 
-    if (
-        vehicle === "plane"
-    ) {
-
-        const wingGeometry =
-            new THREE.BoxGeometry(
-                8,
-                0.2,
-                1
-            );
-
-
-        const wingMaterial =
-            new THREE.MeshStandardMaterial({
-                color: 0xffffff
-            });
-
-
-        const wing =
-            new THREE.Mesh(
-                wingGeometry,
-                wingMaterial
-            );
-
-
-        wing.position.y =
-            0.8;
-
-
-        group.add(
-            wing
-        );
-
-    }
-
-
-    if (
-        vehicle === "boat"
-    ) {
-
-        const cabinGeometry =
-            new THREE.BoxGeometry(
-                1.8,
-                0.8,
-                1.5
-            );
-
-
-        const cabinMaterial =
-            new THREE.MeshStandardMaterial({
-                color: 0xffffff
-            });
-
-
-        const cabin =
-            new THREE.Mesh(
-                cabinGeometry,
-                cabinMaterial
-            );
-
-
-        cabin.position.y =
-            1.5;
-
-
-        group.add(
-            cabin
-        );
-
-    }
-
-
     return group;
 
 }
@@ -1306,12 +949,10 @@ function createWheels(
 
 
     const positions = [
-
         [-1.25, 0.45, -1.35],
         [1.25, 0.45, -1.35],
         [-1.25, 0.45, 1.35],
         [1.25, 0.45, 1.35]
-
     ];
 
 
@@ -1359,10 +1000,7 @@ function animate() {
 
     const delta =
         clock
-            ? Math.min(
-                clock.getDelta(),
-                0.05
-            )
+            ? clock.getDelta()
             : 0.016;
 
 
@@ -1374,8 +1012,6 @@ function animate() {
         updateLocalPlayer(
             delta
         );
-
-        checkVehicleProximity();
 
     }
 
@@ -1409,16 +1045,31 @@ function updateLocalPlayer(
 
     let speed =
         inVehicle
-            ? (
-                VEHICLES[
-                    currentVehicle
-                ]?.speed || 18
-            )
+            ? 18
             : 7;
 
 
-    let moveX = 0;
+    if (
+        currentVehicle === "plane"
+    ) {
 
+        speed =
+            30;
+
+    }
+
+
+    if (
+        currentVehicle === "boat"
+    ) {
+
+        speed =
+            12;
+
+    }
+
+
+    let moveX = 0;
     let moveZ = 0;
 
 
@@ -1445,8 +1096,7 @@ function updateLocalPlayer(
     ) {
 
         playerRotation +=
-            2.5 *
-            delta;
+            2.5 * delta;
 
     }
 
@@ -1456,8 +1106,7 @@ function updateLocalPlayer(
     ) {
 
         playerRotation -=
-            2.5 *
-            delta;
+            2.5 * delta;
 
     }
 
@@ -1558,7 +1207,9 @@ function updateCamera() {
         !camera ||
         !localPlayer
     ) {
+
         return;
+
     }
 
 
@@ -1594,24 +1245,21 @@ function updateCamera() {
         (
             targetX -
             camera.position.x
-        ) *
-        0.08;
+        ) * 0.08;
 
 
     camera.position.y +=
         (
             height -
             camera.position.y
-        ) *
-        0.08;
+        ) * 0.08;
 
 
     camera.position.z +=
         (
             targetZ -
             camera.position.z
-        ) *
-        0.08;
+        ) * 0.08;
 
 
     camera.lookAt(
@@ -1629,27 +1277,6 @@ function updateCamera() {
 
 function connectWebSocket() {
 
-    if (
-        connecting ||
-        (
-            socket &&
-            (
-                socket.readyState ===
-                WebSocket.OPEN ||
-                socket.readyState ===
-                WebSocket.CONNECTING
-            )
-        )
-    ) {
-
-        return;
-
-    }
-
-
-    connecting = true;
-
-
     try {
 
         socket =
@@ -1661,15 +1288,14 @@ function connectWebSocket() {
         socket.onopen =
             () => {
 
-                connected = true;
+                connected =
+                    true;
 
-                connecting = false;
-
-                reconnectDelay = 2000;
 
                 console.log(
                     "🟢 RoadGame connecté"
                 );
+
 
                 showNotification(
                     "Serveur connecté"
@@ -1681,25 +1307,13 @@ function connectWebSocket() {
         socket.onclose =
             () => {
 
-                connected = false;
+                connected =
+                    false;
 
-                connecting = false;
 
                 console.log(
                     "🔴 Serveur déconnecté"
                 );
-
-                if (
-                    isPlaying
-                ) {
-
-                    showNotification(
-                        "Serveur déconnecté"
-                    );
-
-                }
-
-                scheduleReconnect();
 
             };
 
@@ -1708,7 +1322,7 @@ function connectWebSocket() {
             error => {
 
                 console.error(
-                    "WebSocket :",
+                    "WebSocket error",
                     error
                 );
 
@@ -1725,11 +1339,14 @@ function connectWebSocket() {
                             event.data
                         );
 
+
                     handleServerMessage(
                         data
                     );
 
-                } catch (error) {
+                } catch (
+                    error
+                ) {
 
                     console.error(
                         "Message serveur invalide",
@@ -1740,58 +1357,21 @@ function connectWebSocket() {
 
             };
 
-    } catch (error) {
-
-        connecting = false;
+    } catch (
+        error
+    ) {
 
         console.error(
             error
         );
 
-        scheduleReconnect();
-
     }
 
 }
 
 
 /* =========================================================
-   RECONNEXION
-   ========================================================= */
-
-function scheduleReconnect() {
-
-    if (
-        reconnectTimer
-    ) {
-        return;
-    }
-
-
-    reconnectTimer =
-        setTimeout(
-            () => {
-
-                reconnectTimer =
-                    null;
-
-                connectWebSocket();
-
-                reconnectDelay =
-                    Math.min(
-                        reconnectDelay * 1.5,
-                        15000
-                    );
-
-            },
-            reconnectDelay
-        );
-
-}
-
-
-/* =========================================================
-   ENVOYER
+   ENVOYER AU SERVEUR
    ========================================================= */
 
 function send(
@@ -1801,34 +1381,26 @@ function send(
     if (
         !socket ||
         socket.readyState !==
-        WebSocket.OPEN
+            WebSocket.OPEN
     ) {
 
-        return false;
-
-    }
-
-
-    try {
-
-        socket.send(
-            JSON.stringify(
-                data
-            )
-        );
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Erreur d'envoi :",
-            error
+        showNotification(
+            "Serveur non connecté"
         );
 
         return false;
 
     }
+
+
+    socket.send(
+        JSON.stringify(
+            data
+        )
+    );
+
+
+    return true;
 
 }
 
@@ -1845,9 +1417,7 @@ function handleServerMessage(
         data.type
     ) {
 
-
         case "connected":
-
             break;
 
 
@@ -1855,10 +1425,6 @@ function handleServerMessage(
 
             currentUser =
                 data.user;
-
-            selectedVehicle =
-                currentUser.selectedVehicle ||
-                "car";
 
             updateUserInterface();
 
@@ -1880,9 +1446,6 @@ function handleServerMessage(
                 currentUser.selectedVehicle ||
                 "car";
 
-            currentVehicle =
-                selectedVehicle;
-
             updateUserInterface();
 
             showMainMenu();
@@ -1896,9 +1459,7 @@ function handleServerMessage(
 
         case "username_changed":
 
-            if (
-                currentUser
-            ) {
+            if (currentUser) {
 
                 currentUser.username =
                     data.username;
@@ -1927,81 +1488,16 @@ function handleServerMessage(
             break;
 
 
-        case "friend_request_received":
-
-            if (
-                currentUser
-            ) {
-
-                if (
-                    !Array.isArray(
-                        currentUser.friendRequests
-                    )
-                ) {
-
-                    currentUser.friendRequests =
-                        [];
-
-                }
-
-
-                if (
-                    data.userId &&
-                    !currentUser.friendRequests.includes(
-                        data.userId
-                    )
-                ) {
-
-                    currentUser.friendRequests.push(
-                        data.userId
-                    );
-
-                }
-
-            }
-
-            updateFriendsUI();
-
-            showNotification(
-                "Nouvelle demande d'ami !"
-            );
-
-            break;
-
-
         case "friend_added":
 
-            if (
-                data.user
-            ) {
-
-                currentUser =
-                    data.user;
-
-            }
+            currentUser =
+                data.user;
 
             updateFriendsUI();
 
             showNotification(
                 "Ami ajouté !"
             );
-
-            break;
-
-
-        case "friends_updated":
-
-            if (
-                currentUser &&
-                data.user
-            ) {
-
-                currentUser =
-                    data.user;
-
-            }
-
-            updateFriendsUI();
 
             break;
 
@@ -2014,43 +1510,12 @@ function handleServerMessage(
             currentPlayerId =
                 data.playerId;
 
-            roomPlayers =
-                data.players ||
-                [];
-
             updateRoomUI(
                 data
             );
 
             openScreen(
                 "roomScreen"
-            );
-
-            break;
-
-
-        case "private_room_created":
-
-            currentRoom =
-                data.room;
-
-            currentPlayerId =
-                data.playerId;
-
-            roomPlayers =
-                data.players ||
-                [];
-
-            updateRoomUI(
-                data
-            );
-
-            openScreen(
-                "roomScreen"
-            );
-
-            showNotification(
-                "Serveur privé créé !"
             );
 
             break;
@@ -2063,10 +1528,6 @@ function handleServerMessage(
 
             currentPlayerId =
                 data.playerId;
-
-            roomPlayers =
-                data.players ||
-                [];
 
             updateRoomUI(
                 data
@@ -2096,10 +1557,6 @@ function handleServerMessage(
             currentPlayerId =
                 data.playerId;
 
-            roomPlayers =
-                data.players ||
-                [];
-
             updateRoomUI(
                 data
             );
@@ -2117,29 +1574,13 @@ function handleServerMessage(
 
         case "player_joined":
 
-            if (
+            addRemotePlayer(
                 data.player
-            ) {
+            );
 
-                if (
-                    !roomPlayers.some(
-                        player =>
-                            player.id ===
-                            data.player.id
-                    )
-                ) {
-
-                    roomPlayers.push(
-                        data.player
-                    );
-
-                }
-
-                addRemotePlayer(
-                    data.player
-                );
-
-            }
+            roomPlayers.push(
+                data.player
+            );
 
             updatePlayersList();
 
@@ -2152,10 +1593,6 @@ function handleServerMessage(
                 data.player
             );
 
-            updateRoomPlayer(
-                data.player
-            );
-
             break;
 
 
@@ -2163,16 +1600,6 @@ function handleServerMessage(
 
             updateRemoteVehicle(
                 data
-            );
-
-            updateRoomPlayer(
-                {
-                    id:
-                        data.playerId,
-
-                    vehicle:
-                        data.vehicle
-                }
             );
 
             break;
@@ -2189,13 +1616,11 @@ function handleServerMessage(
 
         case "vehicle_exit":
 
-            updateRemoteVehicle(
-                {
-                    ...data,
-                    vehicle: "walk",
-                    inVehicle: false
-                }
-            );
+            updateRemoteVehicle({
+                ...data,
+                vehicle: "walk",
+                inVehicle: false
+            });
 
             break;
 
@@ -2220,23 +1645,10 @@ function handleServerMessage(
 
         case "vehicle_purchased":
 
-            if (
-                currentUser
-            ) {
+            if (currentUser) {
 
                 currentUser.vehicles =
-                    data.vehicles ||
-                    currentUser.vehicles;
-
-                if (
-                    typeof data.balance ===
-                    "number"
-                ) {
-
-                    currentUser.balance =
-                        data.balance;
-
-                }
+                    data.vehicles;
 
             }
 
@@ -2253,9 +1665,7 @@ function handleServerMessage(
 
         case "settings_updated":
 
-            if (
-                currentUser
-            ) {
+            if (currentUser) {
 
                 currentUser.settings =
                     data.settings;
@@ -2272,15 +1682,10 @@ function handleServerMessage(
                 "Une erreur est survenue."
             );
 
-            showErrorInCurrentScreen(
-                data.message
-            );
-
             break;
 
 
         case "pong":
-
             break;
 
     }
@@ -2289,7 +1694,7 @@ function handleServerMessage(
 
 
 /* =========================================================
-   INSCRIPTION
+   COMPTE
    ========================================================= */
 
 function register() {
@@ -2321,22 +1726,13 @@ function register() {
 
 
     send({
-
-        type:
-            "register",
-
+        type: "register",
         username,
-
         password
-
     });
 
 }
 
-
-/* =========================================================
-   CONNEXION
-   ========================================================= */
 
 function login() {
 
@@ -2367,14 +1763,9 @@ function login() {
 
 
     send({
-
-        type:
-            "login",
-
+        type: "login",
         username,
-
         password
-
     });
 
 }
@@ -2400,25 +1791,17 @@ function playGuest() {
             "car"
         ],
 
-        selectedVehicle:
-            "car",
+        selectedVehicle: "car",
 
         settings: {
-
             sound: true,
-
             music: true
-
         }
 
     };
 
 
     selectedVehicle =
-        "car";
-
-
-    currentVehicle =
         "car";
 
 
@@ -2433,23 +1816,9 @@ function playGuest() {
 
 function startQuickMatch() {
 
-    if (
-        !connected
-    ) {
-
-        showNotification(
-            "Serveur non connecté."
-        );
-
-        return;
-
-    }
-
-
     send({
 
-        type:
-            "quick_match",
+        type: "quick_match",
 
         vehicle:
             selectedVehicle
@@ -2460,15 +1829,14 @@ function startQuickMatch() {
 
 
 /* =========================================================
-   PARTIE PUBLIQUE
+   CRÉER PARTIE
    ========================================================= */
 
 function createPublicRoom() {
 
     send({
 
-        type:
-            "create_room",
+        type: "create_room",
 
         vehicle:
             selectedVehicle
@@ -2477,10 +1845,6 @@ function createPublicRoom() {
 
 }
 
-
-/* =========================================================
-   PARTIE PRIVÉE
-   ========================================================= */
 
 function createPrivateRoom() {
 
@@ -2490,9 +1854,7 @@ function createPrivateRoom() {
         )?.value;
 
 
-    if (
-        !password
-    ) {
+    if (!password) {
 
         setMessage(
             "privateRoomMessage",
@@ -2528,9 +1890,7 @@ function joinRoom() {
     const room =
         document.getElementById(
             "roomCodeInput"
-        )?.value
-            .trim()
-            .toUpperCase();
+        )?.value.trim();
 
 
     const password =
@@ -2540,9 +1900,7 @@ function joinRoom() {
         "";
 
 
-    if (
-        !room
-    ) {
+    if (!room) {
 
         setMessage(
             "multiplayerMessage",
@@ -2572,7 +1930,7 @@ function joinRoom() {
 
 
 /* =========================================================
-   DÉMARRER JEU
+   JEU
    ========================================================= */
 
 function startGame() {
@@ -2599,38 +1957,24 @@ function startGame() {
     updateHud();
 
 
-    if (
-        currentRoom
-    ) {
+    send({
 
-        send({
+        type:
+            "player_update",
 
-            type:
-                "player_update",
+        latitude:
+            48.8566,
 
-            latitude:
-                48.8566 +
-                playerPosition.z /
-                111000,
+        longitude:
+            2.3522,
 
-            longitude:
-                2.3522 +
-                playerPosition.x /
-                111000,
+        rotation:
+            playerRotation
 
-            rotation:
-                playerRotation
-
-        });
-
-    }
+    });
 
 }
 
-
-/* =========================================================
-   SORTIR DU JEU
-   ========================================================= */
 
 function exitGame() {
 
@@ -2639,6 +1983,12 @@ function exitGame() {
 
     isPaused =
         false;
+
+    currentRoom =
+        null;
+
+    currentPlayerId =
+        null;
 
 
     document
@@ -2652,14 +2002,13 @@ function exitGame() {
 
     removeAllRemotePlayers();
 
-
     showMainMenu();
 
 }
 
 
 /* =========================================================
-   ENTRER VÉHICULE
+   VÉHICULE
    ========================================================= */
 
 function enterVehicle() {
@@ -2667,13 +2016,14 @@ function enterVehicle() {
     if (
         inVehicle
     ) {
+
         return;
+
     }
 
 
     inVehicle =
         true;
-
 
     currentVehicle =
         selectedVehicle;
@@ -2700,22 +2050,19 @@ function enterVehicle() {
 }
 
 
-/* =========================================================
-   SORTIR VÉHICULE
-   ========================================================= */
-
 function exitVehicle() {
 
     if (
         !inVehicle
     ) {
+
         return;
+
     }
 
 
     inVehicle =
         false;
-
 
     currentVehicle =
         "walk";
@@ -2727,10 +2074,7 @@ function exitVehicle() {
 
 
     send({
-
-        type:
-            "exit_vehicle"
-
+        type: "exit_vehicle"
     });
 
 
@@ -2739,142 +2083,6 @@ function exitVehicle() {
 }
 
 
-/* =========================================================
-   PROXIMITÉ VÉHICULE
-   ========================================================= */
-
-function checkVehicleProximity() {
-
-    if (
-        inVehicle
-    ) {
-
-        setNearbyVehicle(
-            false
-        );
-
-        return;
-
-    }
-
-
-    let closest =
-        null;
-
-
-    let closestDistance =
-        Infinity;
-
-
-    remotePlayers.forEach(
-        remote => {
-
-            if (
-                !remote.object
-            ) {
-                return;
-            }
-
-
-            const distance =
-                localPlayer.position.distanceTo(
-                    remote.object.position
-                );
-
-
-            if (
-                distance <
-                closestDistance
-            ) {
-
-                closestDistance =
-                    distance;
-
-                closest =
-                    remote;
-
-            }
-
-        }
-    );
-
-
-    if (
-        closest &&
-        closestDistance <=
-        INTERACTION_DISTANCE
-    ) {
-
-        setNearbyVehicle(
-            true,
-            closest.data.id
-        );
-
-    } else {
-
-        setNearbyVehicle(
-            false
-        );
-
-    }
-
-}
-
-
-function setNearbyVehicle(
-    value,
-    id = null
-) {
-
-    nearbyVehicle =
-        value;
-
-    nearbyVehicleId =
-        id;
-
-
-    const button =
-        document.getElementById(
-            "enterVehicleButton"
-        );
-
-
-    if (
-        !button
-    ) {
-        return;
-    }
-
-
-    if (
-        !inVehicle &&
-        nearbyVehicle
-    ) {
-
-        button.classList.remove(
-            "hidden"
-        );
-
-        button.textContent =
-            "🚗 Entrer";
-
-    } else if (
-        !inVehicle
-    ) {
-
-        button.classList.add(
-            "hidden"
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   CHOISIR VÉHICULE
-   ========================================================= */
-
 function selectVehicle(
     vehicle
 ) {
@@ -2882,18 +2090,16 @@ function selectVehicle(
     if (
         !VEHICLES[vehicle]
     ) {
+
         return;
+
     }
 
 
-    const owned =
-        currentUser?.vehicles ||
-        ["car"];
-
-
     if (
-        vehicle !== "walk" &&
-        !owned.includes(
+        currentUser &&
+        currentUser.vehicles &&
+        !currentUser.vehicles.includes(
             vehicle
         )
     ) {
@@ -2911,9 +2117,7 @@ function selectVehicle(
         vehicle;
 
 
-    if (
-        currentUser
-    ) {
+    if (currentUser) {
 
         currentUser.selectedVehicle =
             vehicle;
@@ -2925,10 +2129,6 @@ function selectVehicle(
 
 }
 
-
-/* =========================================================
-   UTILISER VÉHICULE
-   ========================================================= */
 
 function useSelectedVehicle() {
 
@@ -2964,41 +2164,23 @@ function useSelectedVehicle() {
     );
 
 
-    const vehicle =
+    showNotification(
         VEHICLES[
             selectedVehicle
-        ];
-
-
-    showNotification(
-        (
-            vehicle?.icon ||
-            "🚗"
-        ) +
+        ].icon +
         " " +
-        (
-            vehicle?.name ||
+        VEHICLES[
             selectedVehicle
-        )
+        ].name +
+        " sélectionné"
     );
 
 }
 
 
-/* =========================================================
-   ACHETER VÉHICULE
-   ========================================================= */
-
 function buyVehicle(
     vehicle
 ) {
-
-    if (
-        !VEHICLES[vehicle]
-    ) {
-        return;
-    }
-
 
     send({
 
@@ -3013,8 +2195,12 @@ function buyVehicle(
 
 
 /* =========================================================
-   POSITION MULTI
+   MULTIJOUEUR
    ========================================================= */
+
+let lastPositionSend =
+    0;
+
 
 function sendPlayerPosition() {
 
@@ -3022,7 +2208,7 @@ function sendPlayerPosition() {
         !currentRoom ||
         !socket ||
         socket.readyState !==
-        WebSocket.OPEN
+            WebSocket.OPEN
     ) {
 
         return;
@@ -3037,7 +2223,7 @@ function sendPlayerPosition() {
     if (
         now -
         lastPositionSend <
-        80
+        50
     ) {
 
         return;
@@ -3073,7 +2259,7 @@ function sendPlayerPosition() {
 
 
 /* =========================================================
-   JOUEUR DISTANT
+   JOUEURS DISTANTS
    ========================================================= */
 
 function addRemotePlayer(
@@ -3083,7 +2269,7 @@ function addRemotePlayer(
     if (
         !player ||
         player.id ===
-        currentPlayerId
+            currentPlayerId
     ) {
 
         return;
@@ -3128,9 +2314,7 @@ function addRemotePlayer(
         player.id,
         {
             object,
-            data: {
-                ...player
-            }
+            data: player
         }
     );
 
@@ -3144,7 +2328,7 @@ function updateRemotePlayer(
     if (
         !player ||
         player.id ===
-        currentPlayerId
+            currentPlayerId
     ) {
 
         return;
@@ -3158,9 +2342,7 @@ function updateRemotePlayer(
         );
 
 
-    if (
-        !remote
-    ) {
+    if (!remote) {
 
         addRemotePlayer(
             player
@@ -3171,10 +2353,8 @@ function updateRemotePlayer(
     }
 
 
-    remote.data = {
-        ...remote.data,
-        ...player
-    };
+    remote.data =
+        player;
 
 
     remote.object.position.x =
@@ -3206,10 +2386,10 @@ function updateRemoteVehicle(
         );
 
 
-    if (
-        !remote
-    ) {
+    if (!remote) {
+
         return;
+
     }
 
 
@@ -3234,10 +2414,6 @@ function updateRemoteVehicle(
     );
 
 
-    newObject.rotation.y =
-        remote.object.rotation.y;
-
-
     scene?.add(
         newObject
     );
@@ -3248,14 +2424,7 @@ function updateRemoteVehicle(
 
 
     remote.data.vehicle =
-        data.vehicle ||
-        "walk";
-
-
-    remote.data.inVehicle =
-        data.inVehicle ??
-        data.vehicle !==
-        "walk";
+        data.vehicle;
 
 }
 
@@ -3270,9 +2439,8 @@ function removeRemotePlayer(
         );
 
 
-    if (
-        !remote
-    ) {
+    if (!remote) {
+
         return;
 
     }
@@ -3319,8 +2487,7 @@ function gpsToX(
     return (
         longitude -
         2.3522
-    ) *
-    111000;
+    ) * 111000;
 
 }
 
@@ -3332,8 +2499,7 @@ function gpsToZ(
     return (
         latitude -
         48.8566
-    ) *
-    111000;
+    ) * 111000;
 
 }
 
@@ -3356,9 +2522,7 @@ function updateHud() {
         );
 
 
-    if (
-        name
-    ) {
+    if (name) {
 
         name.textContent =
             currentUser
@@ -3368,9 +2532,7 @@ function updateHud() {
     }
 
 
-    if (
-        vehicle
-    ) {
+    if (vehicle) {
 
         const data =
             VEHICLES[
@@ -3380,11 +2542,9 @@ function updateHud() {
 
         vehicle.textContent =
             data
-                ? (
-                    data.icon +
-                    " " +
-                    data.name
-                )
+                ? data.icon +
+                  " " +
+                  data.name
                 : "À pied";
 
     }
@@ -3394,10 +2554,6 @@ function updateHud() {
 
 }
 
-
-/* =========================================================
-   BOUTONS VÉHICULE
-   ========================================================= */
 
 function updateVehicleButtons() {
 
@@ -3417,7 +2573,9 @@ function updateVehicleButtons() {
         !enter ||
         !exit
     ) {
+
         return;
+
     }
 
 
@@ -3429,40 +2587,19 @@ function updateVehicleButtons() {
             "hidden"
         );
 
-
         exit.classList.remove(
             "hidden"
         );
 
-
-        exit.textContent =
-            "🚶 Sortir";
-
     } else {
+
+        enter.classList.remove(
+            "hidden"
+        );
 
         exit.classList.add(
             "hidden"
         );
-
-
-        if (
-            nearbyVehicle
-        ) {
-
-            enter.classList.remove(
-                "hidden"
-            );
-
-            enter.textContent =
-                "🚗 Entrer";
-
-        } else {
-
-            enter.classList.add(
-                "hidden"
-            );
-
-        }
 
     }
 
@@ -3481,10 +2618,10 @@ function updateGarageUI() {
         );
 
 
-    if (
-        !container
-    ) {
+    if (!container) {
+
         return;
+
     }
 
 
@@ -3503,7 +2640,9 @@ function updateGarageUI() {
             if (
                 !VEHICLES[vehicle]
             ) {
+
                 return;
+
             }
 
 
@@ -3555,7 +2694,7 @@ function updateGarageUI() {
                 .querySelector(
                     "button"
                 )
-                ?.addEventListener(
+                .addEventListener(
                     "click",
                     () => {
 
@@ -3574,37 +2713,6 @@ function updateGarageUI() {
         }
     );
 
-
-    const selectedText =
-        document.getElementById(
-            "selectedVehicleText"
-        );
-
-
-    if (
-        selectedText
-    ) {
-
-        const vehicle =
-            VEHICLES[
-                selectedVehicle
-            ];
-
-
-        selectedText.textContent =
-            "Véhicule sélectionné : " +
-            (
-                vehicle
-                    ? (
-                        vehicle.icon +
-                        " " +
-                        vehicle.name
-                    )
-                    : selectedVehicle
-            );
-
-    }
-
 }
 
 
@@ -3620,10 +2728,10 @@ function updateShopUI() {
         );
 
 
-    if (
-        !container
-    ) {
+    if (!container) {
+
         return;
+
     }
 
 
@@ -3645,20 +2753,10 @@ function updateShopUI() {
                 vehicle ===
                 "walk"
             ) {
+
                 return;
+
             }
-
-
-            const data =
-                VEHICLES[
-                    vehicle
-                ];
-
-
-            const isOwned =
-                owned.includes(
-                    vehicle
-                );
 
 
             const card =
@@ -3671,22 +2769,27 @@ function updateShopUI() {
                 "vehicleCard";
 
 
+            const isOwned =
+                owned.includes(
+                    vehicle
+                );
+
+
             card.innerHTML = `
 
                 <div class="vehicleIcon">
-                    ${data.icon}
+                    ${VEHICLES[vehicle].icon}
                 </div>
 
                 <div class="vehicleName">
-                    ${data.name}
+                    ${VEHICLES[vehicle].name}
                 </div>
 
                 <div class="vehiclePrice">
                     ${
                         isOwned
                             ? "Déjà possédé"
-                            : data.price +
-                              " coins"
+                            : "Disponible"
                     }
                 </div>
 
@@ -3711,7 +2814,7 @@ function updateShopUI() {
                     .querySelector(
                         "button"
                     )
-                    ?.addEventListener(
+                    .addEventListener(
                         "click",
                         () => {
 
@@ -3741,10 +2844,10 @@ function updateShopUI() {
 
 function updateFriendsUI() {
 
-    if (
-        !currentUser
-    ) {
+    if (!currentUser) {
+
         return;
+
     }
 
 
@@ -3760,9 +2863,7 @@ function updateFriendsUI() {
         );
 
 
-    if (
-        requests
-    ) {
+    if (requests) {
 
         requests.innerHTML =
             "";
@@ -3773,9 +2874,7 @@ function updateFriendsUI() {
             [];
 
 
-        if (
-            !list.length
-        ) {
+        if (!list.length) {
 
             requests.innerHTML =
                 `<p class="emptyText">
@@ -3814,7 +2913,7 @@ function updateFriendsUI() {
                         .querySelector(
                             "button"
                         )
-                        ?.addEventListener(
+                        .addEventListener(
                             "click",
                             () => {
 
@@ -3843,9 +2942,7 @@ function updateFriendsUI() {
     }
 
 
-    if (
-        friends
-    ) {
+    if (friends) {
 
         friends.innerHTML =
             "";
@@ -3856,9 +2953,7 @@ function updateFriendsUI() {
             [];
 
 
-        if (
-            !list.length
-        ) {
+        if (!list.length) {
 
             friends.innerHTML =
                 `<p class="emptyText">
@@ -3868,7 +2963,7 @@ function updateFriendsUI() {
         } else {
 
             list.forEach(
-                friend => {
+                userId => {
 
                     const item =
                         document.createElement(
@@ -3880,20 +2975,10 @@ function updateFriendsUI() {
                         "friendItem";
 
 
-                    const name =
-                        typeof friend ===
-                        "string"
-                            ? friend
-                            : (
-                                friend.username ||
-                                "Ami"
-                            );
-
-
                     item.innerHTML = `
 
                         <span class="friendName">
-                            ${escapeHTML(name)}
+                            Ami
                         </span>
 
                     `;
@@ -3917,6 +3002,9 @@ function updateFriendsUI() {
    ROOM
    ========================================================= */
 
+let roomPlayers = [];
+
+
 function updateRoomUI(
     data
 ) {
@@ -3932,74 +3020,11 @@ function updateRoomUI(
         );
 
 
-    if (
-        code
-    ) {
+    if (code) {
 
         code.textContent =
             data.room ||
             "------";
-
-    }
-
-
-    updatePlayersList();
-
-
-    roomPlayers.forEach(
-        player => {
-
-            if (
-                player.id !==
-                currentPlayerId
-            ) {
-
-                addRemotePlayer(
-                    player
-                );
-
-            }
-
-        }
-    );
-
-}
-
-
-function updateRoomPlayer(
-    player
-) {
-
-    if (
-        !player
-    ) {
-        return;
-    }
-
-
-    const index =
-        roomPlayers.findIndex(
-            item =>
-                item.id ===
-                player.id
-        );
-
-
-    if (
-        index ===
-        -1
-    ) {
-
-        roomPlayers.push(
-            player
-        );
-
-    } else {
-
-        roomPlayers[index] = {
-            ...roomPlayers[index],
-            ...player
-        };
 
     }
 
@@ -4017,10 +3042,10 @@ function updatePlayersList() {
         );
 
 
-    if (
-        !container
-    ) {
+    if (!container) {
+
         return;
+
     }
 
 
@@ -4041,24 +3066,20 @@ function updatePlayersList() {
                 "playerItem";
 
 
-            const vehicle =
-                VEHICLES[
-                    player.vehicle
-                ];
-
-
             item.innerHTML = `
 
                 <span class="playerName">
-                    ${escapeHTML(
+                    ${
                         player.name ||
                         "Joueur"
-                    )}
+                    }
                 </span>
 
                 <span>
                     ${
-                        vehicle?.icon ||
+                        VEHICLES[
+                            player.vehicle
+                        ]?.icon ||
                         "🚗"
                     }
                 </span>
@@ -4123,9 +3144,7 @@ function updateUserInterface() {
         );
 
 
-    if (
-        welcome
-    ) {
+    if (welcome) {
 
         welcome.textContent =
             currentUser
@@ -4134,9 +3153,6 @@ function updateUserInterface() {
                 : "Joueur";
 
     }
-
-
-    updateHud();
 
 }
 
@@ -4204,12 +3220,7 @@ function showNotification(
         );
 
 
-    if (
-        !container
-    ) {
-        console.log(
-            text
-        );
+    if (!container) {
 
         return;
 
@@ -4262,9 +3273,7 @@ function setMessage(
         );
 
 
-    if (
-        element
-    ) {
+    if (element) {
 
         element.textContent =
             text;
@@ -4286,25 +3295,11 @@ function setAuthMessage(
 }
 
 
-function showErrorInCurrentScreen(
-    text
-) {
-
-    setMessage(
-        "multiplayerMessage",
-        text
-    );
-
-}
-
-
 /* =========================================================
    BOUTONS
    ========================================================= */
 
 function setupButtons() {
-
-    /* AUTH */
 
     document
         .getElementById(
@@ -4335,8 +3330,6 @@ function setupButtons() {
             playGuest
         );
 
-
-    /* MENU */
 
     document
         .getElementById(
@@ -4374,13 +3367,10 @@ function setupButtons() {
         )
         ?.addEventListener(
             "click",
-            () => {
-
+            () =>
                 openScreen(
                     "multiplayerScreen"
-                );
-
-            }
+                )
         );
 
 
@@ -4444,17 +3434,12 @@ function setupButtons() {
         )
         ?.addEventListener(
             "click",
-            () => {
-
+            () =>
                 openScreen(
                     "settingsScreen"
-                );
-
-            }
+                )
         );
 
-
-    /* MULTI */
 
     document
         .getElementById(
@@ -4472,13 +3457,10 @@ function setupButtons() {
         )
         ?.addEventListener(
             "click",
-            () => {
-
+            () =>
                 openScreen(
                     "privateRoomScreen"
-                );
-
-            }
+                )
         );
 
 
@@ -4502,8 +3484,6 @@ function setupButtons() {
         );
 
 
-    /* ROOM */
-
     document
         .getElementById(
             "startRoomButton"
@@ -4524,8 +3504,6 @@ function setupButtons() {
         );
 
 
-    /* AMIS */
-
     document
         .getElementById(
             "sendFriendRequestButton"
@@ -4536,21 +3514,16 @@ function setupButtons() {
         );
 
 
-    /* PARAMÈTRES */
-
     document
         .getElementById(
             "changeUsernameButton"
         )
         ?.addEventListener(
             "click",
-            () => {
-
+            () =>
                 openScreen(
                     "usernameScreen"
-                );
-
-            }
+                )
         );
 
 
@@ -4594,8 +3567,6 @@ function setupButtons() {
         );
 
 
-    /* VÉHICULE */
-
     document
         .getElementById(
             "enterVehicleButton"
@@ -4626,8 +3597,6 @@ function setupButtons() {
         );
 
 
-    /* CARTE */
-
     document
         .getElementById(
             "mapButton"
@@ -4644,17 +3613,12 @@ function setupButtons() {
         )
         ?.addEventListener(
             "click",
-            () => {
-
+            () =>
                 closeScreen(
                     "mapScreen"
-                );
-
-            }
+                )
         );
 
-
-    /* PAUSE */
 
     document
         .getElementById(
@@ -4685,8 +3649,6 @@ function setupButtons() {
             exitGame
         );
 
-
-    /* FERMETURE */
 
     document
         .querySelectorAll(
@@ -4728,10 +3690,10 @@ function sendFriendRequest() {
         input?.value.trim();
 
 
-    if (
-        !username
-    ) {
+    if (!username) {
+
         return;
+
     }
 
 
@@ -4745,9 +3707,7 @@ function sendFriendRequest() {
     });
 
 
-    if (
-        input
-    ) {
+    if (input) {
 
         input.value =
             "";
@@ -4773,9 +3733,7 @@ function changeUsername() {
         input?.value.trim();
 
 
-    if (
-        !username
-    ) {
+    if (!username) {
 
         setMessage(
             "usernameMessage",
@@ -4805,7 +3763,10 @@ function changeUsername() {
 
 function updateSettings() {
 
-    const settings = {
+    send({
+
+        type:
+            "settings_update",
 
         sound:
             document.getElementById(
@@ -4819,27 +3780,13 @@ function updateSettings() {
             )?.checked ??
             true
 
-    };
-
-
-    send({
-
-        type:
-            "settings_update",
-
-        sound:
-            settings.sound,
-
-        music:
-            settings.music
-
     });
 
 }
 
 
 /* =========================================================
-   DÉCONNEXION
+   LOGOUT
    ========================================================= */
 
 function logout() {
@@ -4856,11 +3803,6 @@ function logout() {
     isPlaying =
         false;
 
-    isPaused =
-        false;
-
-
-    removeAllRemotePlayers();
 
     showAuthScreen();
 
@@ -4873,14 +3815,6 @@ function logout() {
 
 function leaveRoom() {
 
-    send({
-
-        type:
-            "leave_room"
-
-    });
-
-
     currentRoom =
         null;
 
@@ -4889,7 +3823,6 @@ function leaveRoom() {
 
 
     removeAllRemotePlayers();
-
 
     showMainMenu();
 
@@ -4902,10 +3835,10 @@ function leaveRoom() {
 
 function pauseGame() {
 
-    if (
-        !isPlaying
-    ) {
+    if (!isPlaying) {
+
         return;
+
     }
 
 
@@ -4957,10 +3890,10 @@ function drawMap() {
         );
 
 
-    if (
-        !canvas
-    ) {
+    if (!canvas) {
+
         return;
+
     }
 
 
@@ -5048,8 +3981,6 @@ function drawMap() {
     }
 
 
-    /* JOUEUR */
-
     ctx.fillStyle =
         "#1677ff";
 
@@ -5085,69 +4016,6 @@ function drawMap() {
         "Vous",
         canvas.width / 2,
         canvas.height / 2 - 18
-    );
-
-
-    /* AUTRES JOUEURS */
-
-    roomPlayers.forEach(
-        player => {
-
-            if (
-                player.id ===
-                currentPlayerId
-            ) {
-                return;
-            }
-
-
-            if (
-                typeof player.latitude !==
-                "number" ||
-                typeof player.longitude !==
-                "number"
-            ) {
-                return;
-            }
-
-
-            const x =
-                canvas.width / 2 +
-                (
-                    player.longitude -
-                    2.3522
-                ) *
-                0.5;
-
-
-            const y =
-                canvas.height / 2 -
-                (
-                    player.latitude -
-                    48.8566
-                ) *
-                0.5;
-
-
-            ctx.fillStyle =
-                "#e53935";
-
-
-            ctx.beginPath();
-
-
-            ctx.arc(
-                x,
-                y,
-                7,
-                0,
-                Math.PI * 2
-            );
-
-
-            ctx.fill();
-
-        }
     );
 
 }
@@ -5214,23 +4082,6 @@ function setupKeyboard() {
                     } else {
 
                         enterVehicle();
-
-                    }
-
-                    break;
-
-
-                case "escape":
-
-                    if (
-                        isPaused
-                    ) {
-
-                        resumeGame();
-
-                    } else {
-
-                        pauseGame();
 
                     }
 
@@ -5315,7 +4166,9 @@ function setupTouchControls() {
         !joystick ||
         !stick
     ) {
+
         return;
+
     }
 
 
@@ -5381,7 +4234,8 @@ function setupTouchControls() {
     );
 
 
-    const endJoystick =
+    joystick.addEventListener(
+        "touchend",
         event => {
 
             event.preventDefault();
@@ -5417,21 +4271,7 @@ function setupTouchControls() {
 
             }
 
-        };
-
-
-    joystick.addEventListener(
-        "touchend",
-        endJoystick,
-        {
-            passive: false
-        }
-    );
-
-
-    joystick.addEventListener(
-        "touchcancel",
-        endJoystick,
+        },
         {
             passive: false
         }
@@ -5439,10 +4279,6 @@ function setupTouchControls() {
 
 }
 
-
-/* =========================================================
-   JOYSTICK UPDATE
-   ========================================================= */
 
 function updateJoystick(
     touch
@@ -5464,7 +4300,9 @@ function updateJoystick(
         !joystick ||
         !stick
     ) {
+
         return;
+
     }
 
 
@@ -5474,14 +4312,12 @@ function updateJoystick(
 
     const centerX =
         rect.left +
-        rect.width /
-        2;
+        rect.width / 2;
 
 
     const centerY =
         rect.top +
-        rect.height /
-        2;
+        rect.height / 2;
 
 
     let dx =
@@ -5495,8 +4331,7 @@ function updateJoystick(
 
 
     const max =
-        rect.width /
-        2 -
+        rect.width / 2 -
         30;
 
 
@@ -5516,7 +4351,6 @@ function updateJoystick(
             distance *
             max;
 
-
         dy =
             dy /
             distance *
@@ -5526,13 +4360,11 @@ function updateJoystick(
 
 
     joystickX =
-        dx /
-        max;
+        dx / max;
 
 
     joystickY =
-        dy /
-        max;
+        dy / max;
 
 
     stick.style.transform =
@@ -5556,10 +4388,10 @@ function holdButton(
         );
 
 
-    if (
-        !button
-    ) {
+    if (!button) {
+
         return;
+
     }
 
 
@@ -5686,38 +4518,3 @@ window.addEventListener(
 
     }
 );
-
-
-/* =========================================================
-   UTILITAIRE SÉCURITÉ HTML
-   ========================================================= */
-
-function escapeHTML(
-    value
-) {
-
-    return String(
-        value ?? ""
-    )
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-        .replace(
-            /</g,
-            "&lt;"
-        )
-        .replace(
-            />/g,
-            "&gt;"
-        )
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-        .replace(
-            /'/g,
-            "&#039;"
-        );
-
-}
