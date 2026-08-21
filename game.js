@@ -1,16 +1,15 @@
 /* =========================================================
-   ROADGAME - GAME.JS V2
+   ROADGAME — GAME.JS V2
    =========================================================
-   - Écran de chargement 🚗 rouge
-   - Barre de progression + %
-   - Connexion serveur
-   - Comptes
+   - Écran de chargement 🚗 + barre + pourcentage
+   - Connexion WebSocket Render
+   - Création de compte / connexion
    - Multijoueur
    - Partie rapide
-   - Serveurs privés
+   - Parties publiques / privées
    - Véhicules
-   - Entrée / sortie véhicule
-   - Garage
+   - Entrée / sortie du véhicule
+   - Garage / magasin
    - Amis
    - Paramètres
    - Carte
@@ -19,21 +18,20 @@
 
 
 /* =========================================================
-   CONFIG
+   CONFIGURATION SERVEUR
    ========================================================= */
 
-const SERVER_URL =
-    window.location.protocol === "https:"
-        ? "wss://roadgame-server.onrender.com"
-        : "ws://localhost:10000";
+// IMPORTANT : mets ici l'adresse EXACTE de ton serveur Render.
+const SERVER_URL = "wss://roadgame-server.onrender.com";
 
 
 /* =========================================================
-   ÉTAT
+   VARIABLES
    ========================================================= */
 
 let socket = null;
 let connected = false;
+let connecting = false;
 
 let currentUser = null;
 let currentRoom = null;
@@ -63,6 +61,10 @@ let playerRotation = 0;
 let selectedVehicle = "car";
 let currentVehicle = "car";
 let inVehicle = true;
+
+let lastPositionSend = 0;
+
+let roomPlayers = [];
 
 
 /* =========================================================
@@ -125,130 +127,64 @@ let joystickY = 0;
    CHARGEMENT
    ========================================================= */
 
-const loadingState = {
-    progress: 0,
-    status: "Démarrage de RoadGame..."
-};
-
-
-function updateLoading(
-    progress,
+function setLoadingProgress(
+    percent,
     status
 ) {
 
-    loadingState.progress =
-        Math.max(
-            0,
-            Math.min(
-                100,
-                progress
-            )
-        );
-
-    loadingState.status =
-        status;
-
-
-    const bar =
-        document.getElementById(
-            "loadingProgress"
-        );
-
-    const percentage =
-        document.getElementById(
-            "loadingPercentage"
-        );
-
-    const statusText =
-        document.getElementById(
-            "loadingStatus"
-        );
-
     const loadingScreen =
-        document.getElementById(
-            "loadingScreen"
-        );
+        document.getElementById("loadingScreen");
 
+    const loadingBar =
+        document.getElementById("loadingBar");
 
-    if (bar) {
+    const loadingPercent =
+        document.getElementById("loadingPercent");
 
-        bar.style.width =
-            loadingState.progress + "%";
-
-    }
-
-
-    if (percentage) {
-
-        percentage.textContent =
-            Math.round(
-                loadingState.progress
-            ) + "%";
-
-    }
-
-
-    if (statusText) {
-
-        statusText.textContent =
-            loadingState.status;
-
-    }
+    const loadingStatus =
+        document.getElementById("loadingStatus");
 
 
     if (loadingScreen) {
+        loadingScreen.classList.remove("hidden");
+    }
 
-        loadingScreen.classList.remove(
-            "hidden"
-        );
 
+    if (loadingBar) {
+        loadingBar.style.width =
+            `${Math.max(0, Math.min(100, percent))}%`;
+    }
+
+
+    if (loadingPercent) {
+        loadingPercent.textContent =
+            `${Math.round(percent)}%`;
+    }
+
+
+    if (loadingStatus) {
+        loadingStatus.textContent =
+            status;
     }
 
 }
 
 
-function hideLoadingScreen() {
+function finishLoading() {
 
-    updateLoading(
+    setLoadingProgress(
         100,
         "RoadGame est prêt !"
     );
 
 
-    setTimeout(
-        () => {
+    setTimeout(() => {
 
-            const screen =
-                document.getElementById(
-                    "loadingScreen"
-                );
+        document
+            .getElementById("loadingScreen")
+            ?.classList.add("hidden");
 
-            if (screen) {
-
-                screen.classList.add(
-                    "hidden"
-                );
-
-            }
-
-        },
-        500
-    );
-
-}
-
-
-async function wait(
-    milliseconds
-) {
-
-    return new Promise(
-        resolve =>
-            setTimeout(
-                resolve,
-                milliseconds
-            )
-    );
+    }, 500);
 
 }
 
@@ -261,73 +197,63 @@ document.addEventListener(
     "DOMContentLoaded",
     async () => {
 
-        updateLoading(
+        setLoadingProgress(
             5,
-            "Démarrage de RoadGame..."
+            "Initialisation de RoadGame..."
         );
 
-        await wait(150);
-
-        updateLoading(
-            15,
-            "Préparation de l'interface..."
-        );
 
         setupButtons();
 
+
+        setLoadingProgress(
+            15,
+            "Préparation des contrôles..."
+        );
+
+
         setupKeyboard();
-
         setupTouchControls();
+        setupDrivingButtons();
 
-        await wait(150);
 
-        updateLoading(
-            30,
+        setLoadingProgress(
+            25,
             "Connexion au serveur..."
         );
 
+
         connectWebSocket();
 
-        await wait(250);
 
-        updateLoading(
-            45,
+        setLoadingProgress(
+            40,
             "Chargement du moteur 3D..."
         );
 
+
         await loadThreeJS();
 
-        updateLoading(
-            65,
+
+        setLoadingProgress(
+            70,
             "Création du monde..."
         );
 
+
         initThree();
 
-        await wait(250);
 
-        updateLoading(
-            80,
-            "Préparation des véhicules..."
+        setLoadingProgress(
+            90,
+            "Préparation du menu..."
         );
 
-        await wait(200);
-
-        updateLoading(
-            92,
-            "Préparation de l'interface..."
-        );
 
         showAuthScreen();
 
-        await wait(250);
 
-        updateLoading(
-            100,
-            "RoadGame est prêt !"
-        );
-
-        hideLoadingScreen();
+        finishLoading();
 
     }
 );
@@ -341,8 +267,7 @@ async function loadThreeJS() {
 
     if (window.THREE) {
 
-        THREE =
-            window.THREE;
+        THREE = window.THREE;
 
         return;
 
@@ -351,10 +276,9 @@ async function loadThreeJS() {
 
     try {
 
-        THREE =
-            await import(
-                "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
-            );
+        THREE = await import(
+            "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
+        );
 
     } catch (error) {
 
@@ -378,25 +302,17 @@ async function loadThreeJS() {
 
 function initThree() {
 
-    if (
-        !THREE
-    ) {
-
+    if (!THREE) {
         return;
-
     }
 
 
     const canvas =
-        document.getElementById(
-            "gameCanvas"
-        );
+        document.getElementById("gameCanvas");
 
 
     if (!canvas) {
-
         return;
-
     }
 
 
@@ -405,9 +321,7 @@ function initThree() {
 
 
     scene.background =
-        new THREE.Color(
-            0x87ceeb
-        );
+        new THREE.Color(0x87ceeb);
 
 
     camera =
@@ -422,7 +336,7 @@ function initThree() {
 
     camera.position.set(
         0,
-        8,
+        7,
         12
     );
 
@@ -436,7 +350,7 @@ function initThree() {
 
     renderer.setPixelRatio(
         Math.min(
-            window.devicePixelRatio,
+            window.devicePixelRatio || 1,
             2
         )
     );
@@ -454,7 +368,9 @@ function initThree() {
 
     setupWorld();
 
+
     createLocalPlayer();
+
 
     animate();
 
@@ -467,13 +383,8 @@ function initThree() {
 
 function setupWorld() {
 
-    if (
-        !scene ||
-        !THREE
-    ) {
-
+    if (!scene || !THREE) {
         return;
-
     }
 
 
@@ -484,9 +395,7 @@ function setupWorld() {
         );
 
 
-    scene.add(
-        ambient
-    );
+    scene.add(ambient);
 
 
     const sun =
@@ -503,9 +412,7 @@ function setupWorld() {
     );
 
 
-    scene.add(
-        sun
-    );
+    scene.add(sun);
 
 
     const groundGeometry =
@@ -532,9 +439,7 @@ function setupWorld() {
         -Math.PI / 2;
 
 
-    scene.add(
-        ground
-    );
+    scene.add(ground);
 
 
     createRoad(
@@ -566,6 +471,7 @@ function setupWorld() {
             1000
         );
 
+
         createRoad(
             0,
             i,
@@ -592,9 +498,7 @@ function setupWorld() {
                 Math.abs(x) < 25 ||
                 Math.abs(z) < 25
             ) {
-
                 continue;
-
             }
 
 
@@ -611,7 +515,7 @@ function setupWorld() {
 
 
 /* =========================================================
-   ROUTE
+   ROUTES
    ========================================================= */
 
 function createRoad(
@@ -649,15 +553,13 @@ function createRoad(
     );
 
 
-    scene.add(
-        road
-    );
+    scene.add(road);
 
 }
 
 
 /* =========================================================
-   BÂTIMENT
+   BÂTIMENTS
    ========================================================= */
 
 function createBuilding(
@@ -716,9 +618,7 @@ function createBuilding(
     );
 
 
-    scene.add(
-        building
-    );
+    scene.add(building);
 
 }
 
@@ -729,13 +629,8 @@ function createBuilding(
 
 function createLocalPlayer() {
 
-    if (
-        !THREE ||
-        !scene
-    ) {
-
+    if (!THREE || !scene) {
         return;
-
     }
 
 
@@ -773,7 +668,7 @@ function createLocalPlayer() {
 
 
 /* =========================================================
-   CRÉER VÉHICULE
+   OBJET VÉHICULE
    ========================================================= */
 
 function createVehicleObject(
@@ -788,53 +683,28 @@ function createVehicleObject(
         0x1677ff;
 
 
-    if (
-        vehicle === "truck"
-    ) {
-
-        color =
-            0x9b59b6;
-
+    if (vehicle === "truck") {
+        color = 0x9b59b6;
     }
 
 
-    if (
-        vehicle === "bus"
-    ) {
-
-        color =
-            0xf1c40f;
-
+    if (vehicle === "bus") {
+        color = 0xf1c40f;
     }
 
 
-    if (
-        vehicle === "plane"
-    ) {
-
-        color =
-            0xffffff;
-
+    if (vehicle === "plane") {
+        color = 0xffffff;
     }
 
 
-    if (
-        vehicle === "boat"
-    ) {
-
-        color =
-            0x3498db;
-
+    if (vehicle === "boat") {
+        color = 0x3498db;
     }
 
 
-    if (
-        vehicle === "walk"
-    ) {
-
-        color =
-            0x2ecc71;
-
+    if (vehicle === "walk") {
+        color = 0x2ecc71;
     }
 
 
@@ -867,9 +737,7 @@ function createVehicleObject(
         0.8;
 
 
-    group.add(
-        body
-    );
+    group.add(body);
 
 
     if (
@@ -906,9 +774,7 @@ function createVehicleObject(
         );
 
 
-        group.add(
-            cabin
-        );
+        group.add(cabin);
 
 
         createWheels(
@@ -949,10 +815,12 @@ function createWheels(
 
 
     const positions = [
+
         [-1.25, 0.45, -1.35],
         [1.25, 0.45, -1.35],
         [-1.25, 0.45, 1.35],
         [1.25, 0.45, 1.35]
+
     ];
 
 
@@ -977,9 +845,7 @@ function createWheels(
             );
 
 
-            group.add(
-                wheel
-            );
+            group.add(wheel);
 
         }
     );
@@ -1019,11 +885,7 @@ function animate() {
     updateCamera();
 
 
-    if (
-        renderer &&
-        scene &&
-        camera
-    ) {
+    if (renderer && scene && camera) {
 
         renderer.render(
             scene,
@@ -1052,20 +914,14 @@ function updateLocalPlayer(
     if (
         currentVehicle === "plane"
     ) {
-
-        speed =
-            30;
-
+        speed = 30;
     }
 
 
     if (
         currentVehicle === "boat"
     ) {
-
-        speed =
-            12;
-
+        speed = 12;
     }
 
 
@@ -1073,27 +929,17 @@ function updateLocalPlayer(
     let moveZ = 0;
 
 
-    if (
-        controls.forward
-    ) {
-
+    if (controls.forward) {
         moveZ -= 1;
-
     }
 
 
-    if (
-        controls.backward
-    ) {
-
+    if (controls.backward) {
         moveZ += 1;
-
     }
 
 
-    if (
-        controls.left
-    ) {
+    if (controls.left) {
 
         playerRotation +=
             2.5 * delta;
@@ -1101,9 +947,7 @@ function updateLocalPlayer(
     }
 
 
-    if (
-        controls.right
-    ) {
+    if (controls.right) {
 
         playerRotation -=
             2.5 * delta;
@@ -1111,15 +955,10 @@ function updateLocalPlayer(
     }
 
 
-    if (
-        joystickActive
-    ) {
+    if (joystickActive) {
 
-        moveX +=
-            joystickX;
-
-        moveZ +=
-            joystickY;
+        moveX += joystickX;
+        moveZ += joystickY;
 
     }
 
@@ -1131,15 +970,10 @@ function updateLocalPlayer(
         );
 
 
-    if (
-        length > 1
-    ) {
+    if (length > 1) {
 
-        moveX /=
-            length;
-
-        moveZ /=
-            length;
+        moveX /= length;
+        moveZ /= length;
 
     }
 
@@ -1183,8 +1017,10 @@ function updateLocalPlayer(
         localPlayer.position.x =
             playerPosition.x;
 
+
         localPlayer.position.z =
             playerPosition.z;
+
 
         localPlayer.rotation.y =
             playerRotation;
@@ -1203,13 +1039,8 @@ function updateLocalPlayer(
 
 function updateCamera() {
 
-    if (
-        !camera ||
-        !localPlayer
-    ) {
-
+    if (!camera || !localPlayer) {
         return;
-
     }
 
 
@@ -1227,17 +1058,13 @@ function updateCamera() {
 
     const targetX =
         playerPosition.x -
-        Math.sin(
-            playerRotation
-        ) *
+        Math.sin(playerRotation) *
         distance;
 
 
     const targetZ =
         playerPosition.z -
-        Math.cos(
-            playerRotation
-        ) *
+        Math.cos(playerRotation) *
         distance;
 
 
@@ -1277,6 +1104,28 @@ function updateCamera() {
 
 function connectWebSocket() {
 
+    if (connecting) {
+        return;
+    }
+
+
+    if (
+        socket &&
+        socket.readyState === WebSocket.OPEN
+    ) {
+        return;
+    }
+
+
+    connecting = true;
+
+
+    console.log(
+        "Connexion à :",
+        SERVER_URL
+    );
+
+
     try {
 
         socket =
@@ -1288,8 +1137,8 @@ function connectWebSocket() {
         socket.onopen =
             () => {
 
-                connected =
-                    true;
+                connecting = false;
+                connected = true;
 
 
                 console.log(
@@ -1299,31 +1148,6 @@ function connectWebSocket() {
 
                 showNotification(
                     "Serveur connecté"
-                );
-
-            };
-
-
-        socket.onclose =
-            () => {
-
-                connected =
-                    false;
-
-
-                console.log(
-                    "🔴 Serveur déconnecté"
-                );
-
-            };
-
-
-        socket.onerror =
-            error => {
-
-                console.error(
-                    "WebSocket error",
-                    error
                 );
 
             };
@@ -1344,12 +1168,10 @@ function connectWebSocket() {
                         data
                     );
 
-                } catch (
-                    error
-                ) {
+                } catch (error) {
 
                     console.error(
-                        "Message serveur invalide",
+                        "Message serveur invalide :",
                         error
                     );
 
@@ -1357,11 +1179,57 @@ function connectWebSocket() {
 
             };
 
-    } catch (
-        error
-    ) {
+
+        socket.onerror =
+            error => {
+
+                console.error(
+                    "Erreur WebSocket :",
+                    error
+                );
+
+            };
+
+
+        socket.onclose =
+            () => {
+
+                connecting = false;
+                connected = false;
+
+
+                console.log(
+                    "🔴 Serveur déconnecté"
+                );
+
+
+                showNotification(
+                    "Serveur déconnecté"
+                );
+
+
+                // Reconnexion automatique
+                setTimeout(
+                    () => {
+
+                        if (!connected) {
+                            connectWebSocket();
+                        }
+
+                    },
+                    5000
+                );
+
+            };
+
+    } catch (error) {
+
+        connecting = false;
+        connected = false;
+
 
         console.error(
+            "Impossible de créer WebSocket :",
             error
         );
 
@@ -1374,9 +1242,7 @@ function connectWebSocket() {
    ENVOYER AU SERVEUR
    ========================================================= */
 
-function send(
-    data
-) {
+function send(data) {
 
     if (
         !socket ||
@@ -1388,19 +1254,32 @@ function send(
             "Serveur non connecté"
         );
 
+
         return false;
 
     }
 
 
-    socket.send(
-        JSON.stringify(
-            data
-        )
-    );
+    try {
+
+        socket.send(
+            JSON.stringify(data)
+        );
 
 
-    return true;
+        return true;
+
+    } catch (error) {
+
+        console.error(
+            "Erreur envoi :",
+            error
+        );
+
+
+        return false;
+
+    }
 
 }
 
@@ -1409,13 +1288,9 @@ function send(
    MESSAGES SERVEUR
    ========================================================= */
 
-function handleServerMessage(
-    data
-) {
+function handleServerMessage(data) {
 
-    switch (
-        data.type
-    ) {
+    switch (data.type) {
 
         case "connected":
             break;
@@ -1425,6 +1300,10 @@ function handleServerMessage(
 
             currentUser =
                 data.user;
+
+            selectedVehicle =
+                currentUser.selectedVehicle ||
+                "car";
 
             updateUserInterface();
 
@@ -1466,11 +1345,14 @@ function handleServerMessage(
 
             }
 
+
             updateUserInterface();
+
 
             closeScreen(
                 "usernameScreen"
             );
+
 
             showNotification(
                 "Pseudo modifié"
@@ -1495,6 +1377,7 @@ function handleServerMessage(
 
             updateFriendsUI();
 
+
             showNotification(
                 "Ami ajouté !"
             );
@@ -1510,9 +1393,11 @@ function handleServerMessage(
             currentPlayerId =
                 data.playerId;
 
+
             updateRoomUI(
                 data
             );
+
 
             openScreen(
                 "roomScreen"
@@ -1529,9 +1414,11 @@ function handleServerMessage(
             currentPlayerId =
                 data.playerId;
 
+
             updateRoomUI(
                 data
             );
+
 
             openScreen(
                 "roomScreen"
@@ -1557,13 +1444,16 @@ function handleServerMessage(
             currentPlayerId =
                 data.playerId;
 
+
             updateRoomUI(
                 data
             );
 
+
             openScreen(
                 "roomScreen"
             );
+
 
             showNotification(
                 "Partie rapide trouvée !"
@@ -1578,9 +1468,11 @@ function handleServerMessage(
                 data.player
             );
 
+
             roomPlayers.push(
                 data.player
             );
+
 
             updatePlayersList();
 
@@ -1631,12 +1523,14 @@ function handleServerMessage(
                 data.playerId
             );
 
+
             roomPlayers =
                 roomPlayers.filter(
                     player =>
                         player.id !==
                         data.playerId
                 );
+
 
             updatePlayersList();
 
@@ -1652,9 +1546,10 @@ function handleServerMessage(
 
             }
 
-            updateGarageUI();
 
+            updateGarageUI();
             updateShopUI();
+
 
             showNotification(
                 "Véhicule ajouté au garage !"
@@ -1682,6 +1577,11 @@ function handleServerMessage(
                 "Une erreur est survenue."
             );
 
+
+            showErrorInCurrentScreen(
+                data.message
+            );
+
             break;
 
 
@@ -1700,25 +1600,39 @@ function handleServerMessage(
 function register() {
 
     const username =
-        document.getElementById(
-            "usernameInput"
-        )?.value.trim();
+        document
+            .getElementById(
+                "usernameInput"
+            )
+            ?.value.trim();
 
 
     const password =
-        document.getElementById(
-            "passwordInput"
-        )?.value;
+        document
+            .getElementById(
+                "passwordInput"
+            )
+            ?.value;
 
 
-    if (
-        !username ||
-        !password
-    ) {
+    if (!username || !password) {
 
         setAuthMessage(
             "Remplis tous les champs."
         );
+
+
+        return;
+
+    }
+
+
+    if (!connected) {
+
+        setAuthMessage(
+            "Serveur non connecté. Attends quelques secondes."
+        );
+
 
         return;
 
@@ -1737,25 +1651,39 @@ function register() {
 function login() {
 
     const username =
-        document.getElementById(
-            "usernameInput"
-        )?.value.trim();
+        document
+            .getElementById(
+                "usernameInput"
+            )
+            ?.value.trim();
 
 
     const password =
-        document.getElementById(
-            "passwordInput"
-        )?.value;
+        document
+            .getElementById(
+                "passwordInput"
+            )
+            ?.value;
 
 
-    if (
-        !username ||
-        !password
-    ) {
+    if (!username || !password) {
 
         setAuthMessage(
             "Remplis tous les champs."
         );
+
+
+        return;
+
+    }
+
+
+    if (!connected) {
+
+        setAuthMessage(
+            "Serveur non connecté. Attends quelques secondes."
+        );
+
 
         return;
 
@@ -1816,42 +1744,52 @@ function playGuest() {
 
 function startQuickMatch() {
 
+    if (!connected) {
+
+        showNotification(
+            "Serveur non connecté."
+        );
+
+
+        return;
+
+    }
+
+
     send({
-
         type: "quick_match",
-
-        vehicle:
-            selectedVehicle
-
+        vehicle: selectedVehicle
     });
 
 }
 
 
 /* =========================================================
-   CRÉER PARTIE
+   PARTIE PUBLIQUE
    ========================================================= */
 
 function createPublicRoom() {
 
     send({
-
         type: "create_room",
-
-        vehicle:
-            selectedVehicle
-
+        vehicle: selectedVehicle
     });
 
 }
 
 
+/* =========================================================
+   PARTIE PRIVÉE
+   ========================================================= */
+
 function createPrivateRoom() {
 
     const password =
-        document.getElementById(
-            "privatePasswordInput"
-        )?.value;
+        document
+            .getElementById(
+                "privatePasswordInput"
+            )
+            ?.value;
 
 
     if (!password) {
@@ -1861,6 +1799,7 @@ function createPrivateRoom() {
             "Entre un mot de passe."
         );
 
+
         return;
 
     }
@@ -1868,8 +1807,7 @@ function createPrivateRoom() {
 
     send({
 
-        type:
-            "create_private_room",
+        type: "create_private_room",
 
         password,
 
@@ -1888,15 +1826,20 @@ function createPrivateRoom() {
 function joinRoom() {
 
     const room =
-        document.getElementById(
-            "roomCodeInput"
-        )?.value.trim();
+        document
+            .getElementById(
+                "roomCodeInput"
+            )
+            ?.value
+            .trim();
 
 
     const password =
-        document.getElementById(
-            "roomPasswordInput"
-        )?.value ||
+        document
+            .getElementById(
+                "roomPasswordInput"
+            )
+            ?.value ||
         "";
 
 
@@ -1907,6 +1850,7 @@ function joinRoom() {
             "Entre le code de la partie."
         );
 
+
         return;
 
     }
@@ -1914,8 +1858,7 @@ function joinRoom() {
 
     send({
 
-        type:
-            "join_room",
+        type: "join_room",
 
         room,
 
@@ -1930,16 +1873,13 @@ function joinRoom() {
 
 
 /* =========================================================
-   JEU
+   DÉMARRER
    ========================================================= */
 
 function startGame() {
 
-    isPlaying =
-        true;
-
-    isPaused =
-        false;
+    isPlaying = true;
+    isPaused = false;
 
 
     closeAllScreens();
@@ -1957,38 +1897,37 @@ function startGame() {
     updateHud();
 
 
-    send({
+    if (currentRoom) {
 
-        type:
-            "player_update",
+        send({
 
-        latitude:
-            48.8566,
+            type: "player_update",
 
-        longitude:
-            2.3522,
+            latitude: 48.8566,
 
-        rotation:
-            playerRotation
+            longitude: 2.3522,
 
-    });
+            rotation: playerRotation
+
+        });
+
+    }
 
 }
 
 
+/* =========================================================
+   QUITTER LE JEU
+   ========================================================= */
+
 function exitGame() {
 
-    isPlaying =
-        false;
+    isPlaying = false;
+    isPaused = false;
 
-    isPaused =
-        false;
 
-    currentRoom =
-        null;
-
-    currentPlayerId =
-        null;
+    currentRoom = null;
+    currentPlayerId = null;
 
 
     document
@@ -2002,28 +1941,25 @@ function exitGame() {
 
     removeAllRemotePlayers();
 
+
     showMainMenu();
 
 }
 
 
 /* =========================================================
-   VÉHICULE
+   ENTRER DANS LE VÉHICULE
    ========================================================= */
 
 function enterVehicle() {
 
-    if (
-        inVehicle
-    ) {
-
+    if (inVehicle) {
         return;
-
     }
 
 
-    inVehicle =
-        true;
+    inVehicle = true;
+
 
     currentVehicle =
         selectedVehicle;
@@ -2031,13 +1967,13 @@ function enterVehicle() {
 
     createLocalPlayer();
 
+
     updateHud();
 
 
     send({
 
-        type:
-            "enter_vehicle",
+        type: "enter_vehicle",
 
         vehicle:
             currentVehicle
@@ -2050,25 +1986,26 @@ function enterVehicle() {
 }
 
 
+/* =========================================================
+   SORTIR DU VÉHICULE
+   ========================================================= */
+
 function exitVehicle() {
 
-    if (
-        !inVehicle
-    ) {
-
+    if (!inVehicle) {
         return;
-
     }
 
 
-    inVehicle =
-        false;
+    inVehicle = false;
+
 
     currentVehicle =
         "walk";
 
 
     createLocalPlayer();
+
 
     updateHud();
 
@@ -2083,16 +2020,14 @@ function exitVehicle() {
 }
 
 
-function selectVehicle(
-    vehicle
-) {
+/* =========================================================
+   CHOISIR VÉHICULE
+   ========================================================= */
 
-    if (
-        !VEHICLES[vehicle]
-    ) {
+function selectVehicle(vehicle) {
 
+    if (!VEHICLES[vehicle]) {
         return;
-
     }
 
 
@@ -2107,6 +2042,7 @@ function selectVehicle(
         showNotification(
             "Tu ne possèdes pas ce véhicule."
         );
+
 
         return;
 
@@ -2130,6 +2066,10 @@ function selectVehicle(
 }
 
 
+/* =========================================================
+   UTILISER VÉHICULE
+   ========================================================= */
+
 function useSelectedVehicle() {
 
     currentVehicle =
@@ -2137,21 +2077,21 @@ function useSelectedVehicle() {
 
 
     inVehicle =
-        selectedVehicle !==
-        "walk";
+        selectedVehicle !== "walk";
 
 
     createLocalPlayer();
 
+
     updateHud();
+
 
     updateVehicleButtons();
 
 
     send({
 
-        type:
-            "vehicle_update",
+        type: "vehicle_update",
 
         vehicle:
             selectedVehicle
@@ -2165,27 +2105,24 @@ function useSelectedVehicle() {
 
 
     showNotification(
-        VEHICLES[
-            selectedVehicle
-        ].icon +
+        VEHICLES[selectedVehicle].icon +
         " " +
-        VEHICLES[
-            selectedVehicle
-        ].name +
+        VEHICLES[selectedVehicle].name +
         " sélectionné"
     );
 
 }
 
 
-function buyVehicle(
-    vehicle
-) {
+/* =========================================================
+   ACHETER
+   ========================================================= */
+
+function buyVehicle(vehicle) {
 
     send({
 
-        type:
-            "buy_vehicle",
+        type: "buy_vehicle",
 
         vehicle
 
@@ -2195,12 +2132,8 @@ function buyVehicle(
 
 
 /* =========================================================
-   MULTIJOUEUR
+   POSITION MULTI
    ========================================================= */
-
-let lastPositionSend =
-    0;
-
 
 function sendPlayerPosition() {
 
@@ -2210,9 +2143,7 @@ function sendPlayerPosition() {
         socket.readyState !==
             WebSocket.OPEN
     ) {
-
         return;
-
     }
 
 
@@ -2221,13 +2152,10 @@ function sendPlayerPosition() {
 
 
     if (
-        now -
-        lastPositionSend <
-        50
+        now - lastPositionSend <
+        100
     ) {
-
         return;
-
     }
 
 
@@ -2237,8 +2165,7 @@ function sendPlayerPosition() {
 
     send({
 
-        type:
-            "player_update",
+        type: "player_update",
 
         latitude:
             48.8566 +
@@ -2259,21 +2186,16 @@ function sendPlayerPosition() {
 
 
 /* =========================================================
-   JOUEURS DISTANTS
+   JOUEUR DISTANT
    ========================================================= */
 
-function addRemotePlayer(
-    player
-) {
+function addRemotePlayer(player) {
 
     if (
         !player ||
-        player.id ===
-            currentPlayerId
+        player.id === currentPlayerId
     ) {
-
         return;
-
     }
 
 
@@ -2290,19 +2212,14 @@ function addRemotePlayer(
 
 
     object.position.set(
-        gpsToX(
-            player.longitude
-        ),
+        gpsToX(player.longitude),
         1,
-        gpsToZ(
-            player.latitude
-        )
+        gpsToZ(player.latitude)
     );
 
 
     object.rotation.y =
-        player.rotation ||
-        0;
+        player.rotation || 0;
 
 
     scene?.add(
@@ -2321,18 +2238,13 @@ function addRemotePlayer(
 }
 
 
-function updateRemotePlayer(
-    player
-) {
+function updateRemotePlayer(player) {
 
     if (
         !player ||
-        player.id ===
-            currentPlayerId
+        player.id === currentPlayerId
     ) {
-
         return;
-
     }
 
 
@@ -2347,6 +2259,7 @@ function updateRemotePlayer(
         addRemotePlayer(
             player
         );
+
 
         return;
 
@@ -2370,15 +2283,12 @@ function updateRemotePlayer(
 
 
     remote.object.rotation.y =
-        player.rotation ||
-        0;
+        player.rotation || 0;
 
 }
 
 
-function updateRemoteVehicle(
-    data
-) {
+function updateRemoteVehicle(data) {
 
     const remote =
         remotePlayers.get(
@@ -2387,9 +2297,7 @@ function updateRemoteVehicle(
 
 
     if (!remote) {
-
         return;
-
     }
 
 
@@ -2429,20 +2337,14 @@ function updateRemoteVehicle(
 }
 
 
-function removeRemotePlayer(
-    id
-) {
+function removeRemotePlayer(id) {
 
     const remote =
-        remotePlayers.get(
-            id
-        );
+        remotePlayers.get(id);
 
 
     if (!remote) {
-
         return;
-
     }
 
 
@@ -2480,9 +2382,7 @@ function removeAllRemotePlayers() {
    GPS
    ========================================================= */
 
-function gpsToX(
-    longitude
-) {
+function gpsToX(longitude) {
 
     return (
         longitude -
@@ -2492,9 +2392,7 @@ function gpsToX(
 }
 
 
-function gpsToZ(
-    latitude
-) {
+function gpsToZ(latitude) {
 
     return (
         latitude -
@@ -2535,9 +2433,7 @@ function updateHud() {
     if (vehicle) {
 
         const data =
-            VEHICLES[
-                currentVehicle
-            ];
+            VEHICLES[currentVehicle];
 
 
         vehicle.textContent =
@@ -2569,23 +2465,17 @@ function updateVehicleButtons() {
         );
 
 
-    if (
-        !enter ||
-        !exit
-    ) {
-
+    if (!enter || !exit) {
         return;
-
     }
 
 
-    if (
-        inVehicle
-    ) {
+    if (inVehicle) {
 
         enter.classList.add(
             "hidden"
         );
+
 
         exit.classList.remove(
             "hidden"
@@ -2596,6 +2486,7 @@ function updateVehicleButtons() {
         enter.classList.remove(
             "hidden"
         );
+
 
         exit.classList.add(
             "hidden"
@@ -2619,14 +2510,11 @@ function updateGarageUI() {
 
 
     if (!container) {
-
         return;
-
     }
 
 
-    container.innerHTML =
-        "";
+    container.innerHTML = "";
 
 
     const owned =
@@ -2637,12 +2525,8 @@ function updateGarageUI() {
     owned.forEach(
         vehicle => {
 
-            if (
-                !VEHICLES[vehicle]
-            ) {
-
+            if (!VEHICLES[vehicle]) {
                 return;
-
             }
 
 
@@ -2680,8 +2564,7 @@ function updateGarageUI() {
 
                 <button>
                     ${
-                        selectedVehicle ===
-                        vehicle
+                        selectedVehicle === vehicle
                             ? "✓ Sélectionné"
                             : "Choisir"
                     }
@@ -2691,9 +2574,7 @@ function updateGarageUI() {
 
 
             card
-                .querySelector(
-                    "button"
-                )
+                .querySelector("button")
                 .addEventListener(
                     "click",
                     () => {
@@ -2713,6 +2594,33 @@ function updateGarageUI() {
         }
     );
 
+
+    const selectedText =
+        document.getElementById(
+            "selectedVehicleText"
+        );
+
+
+    if (selectedText) {
+
+        const vehicle =
+            VEHICLES[
+                selectedVehicle
+            ];
+
+
+        selectedText.textContent =
+            "Véhicule sélectionné : " +
+            (
+                vehicle
+                    ? vehicle.icon +
+                      " " +
+                      vehicle.name
+                    : selectedVehicle
+            );
+
+    }
+
 }
 
 
@@ -2729,14 +2637,11 @@ function updateShopUI() {
 
 
     if (!container) {
-
         return;
-
     }
 
 
-    container.innerHTML =
-        "";
+    container.innerHTML = "";
 
 
     const owned =
@@ -2749,13 +2654,8 @@ function updateShopUI() {
     ).forEach(
         vehicle => {
 
-            if (
-                vehicle ===
-                "walk"
-            ) {
-
+            if (vehicle === "walk") {
                 return;
-
             }
 
 
@@ -2796,19 +2696,13 @@ function updateShopUI() {
                 ${
                     isOwned
                         ? ""
-                        : `
-                            <button>
-                                Acheter
-                            </button>
-                        `
+                        : "<button>Acheter</button>"
                 }
 
             `;
 
 
-            if (
-                !isOwned
-            ) {
+            if (!isOwned) {
 
                 card
                     .querySelector(
@@ -2845,9 +2739,7 @@ function updateShopUI() {
 function updateFriendsUI() {
 
     if (!currentUser) {
-
         return;
-
     }
 
 
@@ -2865,8 +2757,7 @@ function updateFriendsUI() {
 
     if (requests) {
 
-        requests.innerHTML =
-            "";
+        requests.innerHTML = "";
 
 
         const list =
@@ -2944,8 +2835,7 @@ function updateFriendsUI() {
 
     if (friends) {
 
-        friends.innerHTML =
-            "";
+        friends.innerHTML = "";
 
 
         const list =
@@ -2999,15 +2889,10 @@ function updateFriendsUI() {
 
 
 /* =========================================================
-   ROOM
+   SALLE
    ========================================================= */
 
-let roomPlayers = [];
-
-
-function updateRoomUI(
-    data
-) {
+function updateRoomUI(data) {
 
     roomPlayers =
         data.players ||
@@ -3043,14 +2928,11 @@ function updatePlayersList() {
 
 
     if (!container) {
-
         return;
-
     }
 
 
-    container.innerHTML =
-        "";
+    container.innerHTML = "";
 
 
     roomPlayers.forEach(
@@ -3157,14 +3039,10 @@ function updateUserInterface() {
 }
 
 
-function openScreen(
-    id
-) {
+function openScreen(id) {
 
     document
-        .getElementById(
-            id
-        )
+        .getElementById(id)
         ?.classList.remove(
             "hidden"
         );
@@ -3172,14 +3050,10 @@ function openScreen(
 }
 
 
-function closeScreen(
-    id
-) {
+function closeScreen(id) {
 
     document
-        .getElementById(
-            id
-        )
+        .getElementById(id)
         ?.classList.add(
             "hidden"
         );
@@ -3210,9 +3084,7 @@ function closeAllScreens() {
    NOTIFICATIONS
    ========================================================= */
 
-function showNotification(
-    text
-) {
+function showNotification(text) {
 
     const container =
         document.getElementById(
@@ -3221,9 +3093,7 @@ function showNotification(
 
 
     if (!container) {
-
         return;
-
     }
 
 
@@ -3268,27 +3138,31 @@ function setMessage(
 ) {
 
     const element =
-        document.getElementById(
-            id
-        );
+        document.getElementById(id);
 
 
     if (element) {
-
         element.textContent =
             text;
-
     }
 
 }
 
 
-function setAuthMessage(
-    text
-) {
+function setAuthMessage(text) {
 
     setMessage(
         "authMessage",
+        text
+    );
+
+}
+
+
+function showErrorInCurrentScreen(text) {
+
+    setMessage(
+        "multiplayerMessage",
         text
     );
 
@@ -3302,9 +3176,7 @@ function setAuthMessage(
 function setupButtons() {
 
     document
-        .getElementById(
-            "loginButton"
-        )
+        .getElementById("loginButton")
         ?.addEventListener(
             "click",
             login
@@ -3312,9 +3184,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "registerButton"
-        )
+        .getElementById("registerButton")
         ?.addEventListener(
             "click",
             register
@@ -3322,9 +3192,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "guestButton"
-        )
+        .getElementById("guestButton")
         ?.addEventListener(
             "click",
             playGuest
@@ -3332,9 +3200,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "playButton"
-        )
+        .getElementById("playButton")
         ?.addEventListener(
             "click",
             startGame
@@ -3342,9 +3208,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "quickMatchButton"
-        )
+        .getElementById("quickMatchButton")
         ?.addEventListener(
             "click",
             startQuickMatch
@@ -3352,9 +3216,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "quickMatchButton2"
-        )
+        .getElementById("quickMatchButton2")
         ?.addEventListener(
             "click",
             startQuickMatch
@@ -3362,9 +3224,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "multiplayerButton"
-        )
+        .getElementById("multiplayerButton")
         ?.addEventListener(
             "click",
             () =>
@@ -3375,9 +3235,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "garageButton"
-        )
+        .getElementById("garageButton")
         ?.addEventListener(
             "click",
             () => {
@@ -3393,9 +3251,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "shopButton"
-        )
+        .getElementById("shopButton")
         ?.addEventListener(
             "click",
             () => {
@@ -3411,9 +3267,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "friendsButton"
-        )
+        .getElementById("friendsButton")
         ?.addEventListener(
             "click",
             () => {
@@ -3429,9 +3283,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "settingsButton"
-        )
+        .getElementById("settingsButton")
         ?.addEventListener(
             "click",
             () =>
@@ -3442,9 +3294,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "createRoomButton"
-        )
+        .getElementById("createRoomButton")
         ?.addEventListener(
             "click",
             createPublicRoom
@@ -3452,9 +3302,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "createPrivateRoomButton"
-        )
+        .getElementById("createPrivateRoomButton")
         ?.addEventListener(
             "click",
             () =>
@@ -3465,9 +3313,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "confirmPrivateRoomButton"
-        )
+        .getElementById("confirmPrivateRoomButton")
         ?.addEventListener(
             "click",
             createPrivateRoom
@@ -3475,9 +3321,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "joinRoomButton"
-        )
+        .getElementById("joinRoomButton")
         ?.addEventListener(
             "click",
             joinRoom
@@ -3485,9 +3329,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "startRoomButton"
-        )
+        .getElementById("startRoomButton")
         ?.addEventListener(
             "click",
             startGame
@@ -3495,9 +3337,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "leaveRoomButton"
-        )
+        .getElementById("leaveRoomButton")
         ?.addEventListener(
             "click",
             leaveRoom
@@ -3505,9 +3345,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "sendFriendRequestButton"
-        )
+        .getElementById("sendFriendRequestButton")
         ?.addEventListener(
             "click",
             sendFriendRequest
@@ -3515,9 +3353,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "changeUsernameButton"
-        )
+        .getElementById("changeUsernameButton")
         ?.addEventListener(
             "click",
             () =>
@@ -3528,9 +3364,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "confirmUsernameButton"
-        )
+        .getElementById("confirmUsernameButton")
         ?.addEventListener(
             "click",
             changeUsername
@@ -3538,9 +3372,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "logoutButton"
-        )
+        .getElementById("logoutButton")
         ?.addEventListener(
             "click",
             logout
@@ -3548,9 +3380,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "soundToggle"
-        )
+        .getElementById("soundToggle")
         ?.addEventListener(
             "change",
             updateSettings
@@ -3558,9 +3388,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "musicToggle"
-        )
+        .getElementById("musicToggle")
         ?.addEventListener(
             "change",
             updateSettings
@@ -3568,9 +3396,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "enterVehicleButton"
-        )
+        .getElementById("enterVehicleButton")
         ?.addEventListener(
             "click",
             enterVehicle
@@ -3578,9 +3404,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "exitVehicleButton"
-        )
+        .getElementById("exitVehicleButton")
         ?.addEventListener(
             "click",
             exitVehicle
@@ -3588,9 +3412,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "spawnVehicleButton"
-        )
+        .getElementById("spawnVehicleButton")
         ?.addEventListener(
             "click",
             useSelectedVehicle
@@ -3598,9 +3420,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "mapButton"
-        )
+        .getElementById("mapButton")
         ?.addEventListener(
             "click",
             openMap
@@ -3608,9 +3428,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "closeMapButton"
-        )
+        .getElementById("closeMapButton")
         ?.addEventListener(
             "click",
             () =>
@@ -3621,9 +3439,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "menuGameButton"
-        )
+        .getElementById("menuGameButton")
         ?.addEventListener(
             "click",
             pauseGame
@@ -3631,9 +3447,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "resumeButton"
-        )
+        .getElementById("resumeButton")
         ?.addEventListener(
             "click",
             resumeGame
@@ -3641,9 +3455,7 @@ function setupButtons() {
 
 
     document
-        .getElementById(
-            "exitGameButton"
-        )
+        .getElementById("exitGameButton")
         ?.addEventListener(
             "click",
             exitGame
@@ -3691,9 +3503,7 @@ function sendFriendRequest() {
 
 
     if (!username) {
-
         return;
-
     }
 
 
@@ -3708,10 +3518,7 @@ function sendFriendRequest() {
 
 
     if (input) {
-
-        input.value =
-            "";
-
+        input.value = "";
     }
 
 }
@@ -3739,6 +3546,7 @@ function changeUsername() {
             "usernameMessage",
             "Entre un pseudo."
         );
+
 
         return;
 
@@ -3771,14 +3579,12 @@ function updateSettings() {
         sound:
             document.getElementById(
                 "soundToggle"
-            )?.checked ??
-            true,
+            )?.checked ?? true,
 
         music:
             document.getElementById(
                 "musicToggle"
-            )?.checked ??
-            true
+            )?.checked ?? true
 
     });
 
@@ -3791,17 +3597,11 @@ function updateSettings() {
 
 function logout() {
 
-    currentUser =
-        null;
+    currentUser = null;
+    currentRoom = null;
+    currentPlayerId = null;
 
-    currentRoom =
-        null;
-
-    currentPlayerId =
-        null;
-
-    isPlaying =
-        false;
+    isPlaying = false;
 
 
     showAuthScreen();
@@ -3815,14 +3615,17 @@ function logout() {
 
 function leaveRoom() {
 
-    currentRoom =
-        null;
+    send({
+        type: "leave_room"
+    });
 
-    currentPlayerId =
-        null;
+
+    currentRoom = null;
+    currentPlayerId = null;
 
 
     removeAllRemotePlayers();
+
 
     showMainMenu();
 
@@ -3836,14 +3639,11 @@ function leaveRoom() {
 function pauseGame() {
 
     if (!isPlaying) {
-
         return;
-
     }
 
 
-    isPaused =
-        true;
+    isPaused = true;
 
 
     openScreen(
@@ -3855,8 +3655,7 @@ function pauseGame() {
 
 function resumeGame() {
 
-    isPaused =
-        false;
+    isPaused = false;
 
 
     closeScreen(
@@ -3891,9 +3690,7 @@ function drawMap() {
 
 
     if (!canvas) {
-
         return;
-
     }
 
 
@@ -3923,16 +3720,14 @@ function drawMap() {
     );
 
 
-    const gridSize =
-        80;
+    const gridSize = 80;
 
 
     ctx.strokeStyle =
         "#999";
 
 
-    ctx.lineWidth =
-        2;
+    ctx.lineWidth = 2;
 
 
     for (
@@ -3943,10 +3738,7 @@ function drawMap() {
 
         ctx.beginPath();
 
-        ctx.moveTo(
-            x,
-            0
-        );
+        ctx.moveTo(x, 0);
 
         ctx.lineTo(
             x,
@@ -3966,10 +3758,7 @@ function drawMap() {
 
         ctx.beginPath();
 
-        ctx.moveTo(
-            0,
-            y
-        );
+        ctx.moveTo(0, y);
 
         ctx.lineTo(
             canvas.width,
@@ -4037,52 +3826,34 @@ function setupKeyboard() {
 
                 case "z":
                 case "arrowup":
-
-                    controls.forward =
-                        true;
-
+                    controls.forward = true;
                     break;
 
 
                 case "s":
                 case "arrowdown":
-
-                    controls.backward =
-                        true;
-
+                    controls.backward = true;
                     break;
 
 
                 case "q":
                 case "arrowleft":
-
-                    controls.left =
-                        true;
-
+                    controls.left = true;
                     break;
 
 
                 case "d":
                 case "arrowright":
-
-                    controls.right =
-                        true;
-
+                    controls.right = true;
                     break;
 
 
                 case "e":
 
-                    if (
-                        inVehicle
-                    ) {
-
+                    if (inVehicle) {
                         exitVehicle();
-
                     } else {
-
                         enterVehicle();
-
                     }
 
                     break;
@@ -4103,37 +3874,25 @@ function setupKeyboard() {
 
                 case "z":
                 case "arrowup":
-
-                    controls.forward =
-                        false;
-
+                    controls.forward = false;
                     break;
 
 
                 case "s":
                 case "arrowdown":
-
-                    controls.backward =
-                        false;
-
+                    controls.backward = false;
                     break;
 
 
                 case "q":
                 case "arrowleft":
-
-                    controls.left =
-                        false;
-
+                    controls.left = false;
                     break;
 
 
                 case "d":
                 case "arrowright":
-
-                    controls.right =
-                        false;
-
+                    controls.right = false;
                     break;
 
             }
@@ -4162,13 +3921,8 @@ function setupTouchControls() {
         );
 
 
-    if (
-        !joystick ||
-        !stick
-    ) {
-
+    if (!joystick || !stick) {
         return;
-
     }
 
 
@@ -4183,8 +3937,7 @@ function setupTouchControls() {
                 event.changedTouches[0];
 
 
-            joystickActive =
-                true;
+            joystickActive = true;
 
 
             joystickTouchId =
@@ -4251,17 +4004,12 @@ function setupTouchControls() {
                     joystickTouchId
                 ) {
 
-                    joystickActive =
-                        false;
+                    joystickActive = false;
 
-                    joystickTouchId =
-                        null;
+                    joystickTouchId = null;
 
-                    joystickX =
-                        0;
-
-                    joystickY =
-                        0;
+                    joystickX = 0;
+                    joystickY = 0;
 
 
                     stick.style.transform =
@@ -4280,9 +4028,7 @@ function setupTouchControls() {
 }
 
 
-function updateJoystick(
-    touch
-) {
+function updateJoystick(touch) {
 
     const joystick =
         document.getElementById(
@@ -4296,13 +4042,8 @@ function updateJoystick(
         );
 
 
-    if (
-        !joystick ||
-        !stick
-    ) {
-
+    if (!joystick || !stick) {
         return;
-
     }
 
 
@@ -4342,14 +4083,13 @@ function updateJoystick(
         );
 
 
-    if (
-        distance > max
-    ) {
+    if (distance > max) {
 
         dx =
             dx /
             distance *
             max;
+
 
         dy =
             dy /
@@ -4374,8 +4114,36 @@ function updateJoystick(
 
 
 /* =========================================================
-   BOUTONS DE CONDUITE
+   BOUTONS CONDUITE
    ========================================================= */
+
+function setupDrivingButtons() {
+
+    holdButton(
+        "accelerateButton",
+        "forward"
+    );
+
+
+    holdButton(
+        "brakeButton",
+        "backward"
+    );
+
+
+    holdButton(
+        "leftButton",
+        "left"
+    );
+
+
+    holdButton(
+        "rightButton",
+        "right"
+    );
+
+}
+
 
 function holdButton(
     id,
@@ -4383,15 +4151,11 @@ function holdButton(
 ) {
 
     const button =
-        document.getElementById(
-            id
-        );
+        document.getElementById(id);
 
 
     if (!button) {
-
         return;
-
     }
 
 
@@ -4462,30 +4226,6 @@ function holdButton(
     );
 
 }
-
-
-holdButton(
-    "accelerateButton",
-    "forward"
-);
-
-
-holdButton(
-    "brakeButton",
-    "backward"
-);
-
-
-holdButton(
-    "leftButton",
-    "left"
-);
-
-
-holdButton(
-    "rightButton",
-    "right"
-);
 
 
 /* =========================================================
