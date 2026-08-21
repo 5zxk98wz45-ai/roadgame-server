@@ -1,8 +1,7 @@
 // ============================================================
 // ROADGAME - SERVER.JS V2
-// Comptes + sauvegarde + amis + demandes d'amis
-// Parties rapides + serveurs privés avec mot de passe
-// Véhicules + entrée/sortie + multijoueur
+// Comptes + sauvegarde + amis + parties rapides
+// Serveurs privés + mots de passe + véhicules + multijoueur
 // ============================================================
 
 const http = require("http");
@@ -18,101 +17,66 @@ const path = require("path");
 
 const PORT = process.env.PORT || 10000;
 
+const MAX_PLAYERS = 20;
+
+const MAX_NAME_LENGTH = 20;
+
+const MAX_PASSWORD_LENGTH = 50;
+
+
+// ============================================================
+// BASE DE DONNÉES
+// ============================================================
+
+const DATABASE_DIR =
+    path.join(__dirname, "database");
+
 const USERS_FILE =
-    path.join(__dirname, "users.json");
-
-const MAX_PLAYERS_PER_ROOM = 20;
+    path.join(DATABASE_DIR, "users.json");
 
 
-// ============================================================
-// VÉHICULES DISPONIBLES
-// ============================================================
-
-const VEHICLES = {
-    walk: {
-        name: "À pied",
-        price: 0
-    },
-
-    car: {
-        name: "Voiture",
-        price: 0
-    },
-
-    truck: {
-        name: "Camion",
-        price: 500
-    },
-
-    bus: {
-        name: "Bus",
-        price: 1000
-    },
-
-    sports: {
-        name: "Voiture sportive",
-        price: 2500
-    },
-
-    police: {
-        name: "Voiture de police",
-        price: 5000
-    }
-};
+if (!fs.existsSync(DATABASE_DIR)) {
+    fs.mkdirSync(DATABASE_DIR, {
+        recursive: true
+    });
+}
 
 
-// ============================================================
-// CHARGER USERS.JSON
-// ============================================================
+if (!fs.existsSync(USERS_FILE)) {
+    fs.writeFileSync(
+        USERS_FILE,
+        "{}",
+        "utf8"
+    );
+}
+
 
 function loadUsers() {
 
     try {
 
-        if (!fs.existsSync(USERS_FILE)) {
-
-            fs.writeFileSync(
-                USERS_FILE,
-                "[]",
-                "utf8"
-            );
-
-            return [];
-        }
-
-        const data =
+        const content =
             fs.readFileSync(
                 USERS_FILE,
                 "utf8"
             );
 
-        const users =
-            JSON.parse(data);
-
-        if (!Array.isArray(users)) {
-            return [];
-        }
-
-        return users;
+        return JSON.parse(content || "{}");
 
     } catch (error) {
 
         console.error(
-            "❌ Erreur users.json :",
+            "❌ Impossible de lire users.json :",
             error
         );
 
-        return [];
+        return {};
     }
 }
 
 
 let users = loadUsers();
 
-
-// ============================================================
-// SAUVEGARDER USERS.JSON
-// ============================================================
 
 function saveUsers() {
 
@@ -139,12 +103,130 @@ function saveUsers() {
 
 
 // ============================================================
-// OUTILS
+// SERVEUR HTTP
+// ============================================================
+
+const server =
+    http.createServer(
+        (req, res) => {
+
+            if (req.url === "/") {
+
+                res.writeHead(
+                    200,
+                    {
+                        "Content-Type":
+                            "text/plain; charset=utf-8"
+                    }
+                );
+
+                res.end(
+                    "RoadGame V2 Server 🟢"
+                );
+
+                return;
+            }
+
+
+            if (req.url === "/health") {
+
+                res.writeHead(
+                    200,
+                    {
+                        "Content-Type":
+                            "application/json"
+                    }
+                );
+
+                res.end(
+                    JSON.stringify({
+                        online: true,
+                        players:
+                            wss.clients.size,
+                        rooms:
+                            rooms.size
+                    })
+                );
+
+                return;
+            }
+
+
+            res.writeHead(404);
+
+            res.end();
+        }
+    );
+
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+
+const wss =
+    new WebSocket.Server({
+        server
+    });
+
+
+// ============================================================
+// DONNÉES DU SERVEUR
+// ============================================================
+
+const rooms =
+    new Map();
+
+const quickMatchQueue =
+    new Set();
+
+
+// ============================================================
+// VÉHICULES
+// ============================================================
+
+const VEHICLES = {
+
+    walk: {
+        name: "À pied",
+        speed: 0.5
+    },
+
+    car: {
+        name: "Voiture",
+        speed: 1
+    },
+
+    truck: {
+        name: "Camion",
+        speed: 0.7
+    },
+
+    bus: {
+        name: "Bus",
+        speed: 0.65
+    },
+
+    plane: {
+        name: "Avion",
+        speed: 1.5
+    },
+
+    boat: {
+        name: "Bateau",
+        speed: 0.6
+    }
+
+};
+
+
+// ============================================================
+// UTILITAIRES
 // ============================================================
 
 function createId() {
 
     return crypto.randomUUID();
+
 }
 
 
@@ -154,6 +236,7 @@ function hashPassword(password) {
         .createHash("sha256")
         .update(password)
         .digest("hex");
+
 }
 
 
@@ -164,41 +247,44 @@ function cleanName(name) {
     ) {
 
         return "Joueur";
+
     }
+
 
     name =
         name.trim();
 
+
     if (!name) {
+
         return "Joueur";
+
     }
+
 
     return name.substring(
         0,
-        20
+        MAX_NAME_LENGTH
     );
 }
 
 
-function cleanUsername(username) {
+function cleanPassword(password) {
 
     if (
-        typeof username !== "string"
+        typeof password !== "string"
     ) {
 
         return "";
+
     }
 
-    return username
+
+    return password
         .trim()
-        .toLowerCase()
-        .replace(
-            /[^a-z0-9_]/g,
-            ""
-        )
         .substring(
             0,
-            20
+            MAX_PASSWORD_LENGTH
         );
 }
 
@@ -209,6 +295,7 @@ function validNumber(value) {
         typeof value === "number" &&
         Number.isFinite(value)
     );
+
 }
 
 
@@ -216,13 +303,16 @@ function send(ws, data) {
 
     if (
         ws &&
-        ws.readyState === WebSocket.OPEN
+        ws.readyState ===
+            WebSocket.OPEN
     ) {
 
         ws.send(
             JSON.stringify(data)
         );
+
     }
+
 }
 
 
@@ -233,8 +323,8 @@ function broadcast(
 ) {
 
     for (
-        const player
-        of room.players.values()
+        const player of
+        room.players.values()
     ) {
 
         if (
@@ -245,8 +335,11 @@ function broadcast(
                 player.ws,
                 data
             );
+
         }
+
     }
+
 }
 
 
@@ -278,6 +371,7 @@ function publicPlayer(player) {
         rotation:
             player.rotation
     };
+
 }
 
 
@@ -288,96 +382,609 @@ function getPlayers(room) {
     ].map(
         publicPlayer
     );
+
 }
 
 
 // ============================================================
-// SERVEUR HTTP
+// CRÉER UN COMPTE
 // ============================================================
 
-const server =
-    http.createServer(
-        (req, res) => {
+function registerAccount(
+    ws,
+    data
+) {
 
-            if (
-                req.url === "/"
-            ) {
+    const username =
+        cleanName(
+            data.username
+        );
 
-                res.writeHead(
-                    200,
-                    {
-                        "Content-Type":
-                            "text/plain; charset=utf-8"
-                    }
-                );
-
-                res.end(
-                    "RoadGame Server V2 🟢"
-                );
-
-                return;
-            }
+    const password =
+        cleanPassword(
+            data.password
+        );
 
 
-            if (
-                req.url === "/status"
-            ) {
+    if (
+        username.length < 3
+    ) {
 
-                res.writeHead(
-                    200,
-                    {
-                        "Content-Type":
-                            "application/json"
-                    }
-                );
+        send(ws, {
+            type: "error",
+            message:
+                "Le pseudo doit contenir au moins 3 caractères."
+        });
 
-                res.end(
-                    JSON.stringify({
+        return;
 
-                        online: true,
-
-                        rooms:
-                            rooms.size,
-
-                        users:
-                            users.length
-
-                    })
-                );
-
-                return;
-            }
+    }
 
 
-            res.writeHead(
-                404
+    if (
+        password.length < 4
+    ) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Le mot de passe doit contenir au moins 4 caractères."
+        });
+
+        return;
+
+    }
+
+
+    const existing =
+        Object.values(users)
+            .find(
+                user =>
+                    user.username
+                        .toLowerCase() ===
+                    username.toLowerCase()
             );
 
-            res.end();
-        }
+
+    if (existing) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Ce pseudo est déjà utilisé."
+        });
+
+        return;
+
+    }
+
+
+    const userId =
+        createId();
+
+
+    users[userId] = {
+
+        id:
+            userId,
+
+        username:
+            username,
+
+        password:
+            hashPassword(password),
+
+        friends: [],
+
+        friendRequests: [],
+
+        vehicles: [
+            "car"
+        ],
+
+        selectedVehicle:
+            "car",
+
+        settings: {
+
+            sound: true,
+
+            music: true
+
+        },
+
+        createdAt:
+            Date.now()
+
+    };
+
+
+    saveUsers();
+
+
+    ws.userId =
+        userId;
+
+
+    send(ws, {
+
+        type:
+            "account_created",
+
+        user:
+            publicUser(
+                users[userId]
+            )
+
+    });
+
+
+    console.log(
+        `👤 Compte créé : ${username}`
+    );
+
+}
+
+
+// ============================================================
+// CONNEXION
+// ============================================================
+
+function loginAccount(
+    ws,
+    data
+) {
+
+    const username =
+        cleanName(
+            data.username
+        );
+
+    const password =
+        cleanPassword(
+            data.password
+        );
+
+
+    const passwordHash =
+        hashPassword(
+            password
+        );
+
+
+    const user =
+        Object.values(users)
+            .find(
+                user =>
+                    user.username
+                        .toLowerCase() ===
+                    username.toLowerCase() &&
+                    user.password ===
+                    passwordHash
+            );
+
+
+    if (!user) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Pseudo ou mot de passe incorrect."
+        });
+
+        return;
+
+    }
+
+
+    ws.userId =
+        user.id;
+
+
+    send(ws, {
+
+        type:
+            "login_success",
+
+        user:
+            publicUser(user)
+
+    });
+
+
+    console.log(
+        `🟢 Connexion : ${user.username}`
+    );
+
+}
+
+
+// ============================================================
+// DONNÉES PUBLIQUES DU COMPTE
+// ============================================================
+
+function publicUser(user) {
+
+    return {
+
+        id:
+            user.id,
+
+        username:
+            user.username,
+
+        friends:
+            user.friends || [],
+
+        friendRequests:
+            user.friendRequests || [],
+
+        vehicles:
+            user.vehicles || [],
+
+        selectedVehicle:
+            user.selectedVehicle ||
+            "car",
+
+        settings:
+            user.settings || {}
+
+    };
+
+}
+
+
+// ============================================================
+// AUTHENTIFICATION
+// ============================================================
+
+function getUser(ws) {
+
+    if (!ws.userId) {
+
+        return null;
+
+    }
+
+
+    return users[
+        ws.userId
+    ] || null;
+
+}
+
+
+// ============================================================
+// CHANGER DE PSEUDO
+// ============================================================
+
+function changeUsername(
+    ws,
+    data
+) {
+
+    const user =
+        getUser(ws);
+
+
+    if (!user) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Connecte-toi d'abord."
+        });
+
+        return;
+
+    }
+
+
+    const newName =
+        cleanName(
+            data.username
+        );
+
+
+    if (
+        newName.length < 3
+    ) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Le pseudo est trop court."
+        });
+
+        return;
+
+    }
+
+
+    const existing =
+        Object.values(users)
+            .find(
+                other =>
+                    other.id !== user.id &&
+                    other.username
+                        .toLowerCase() ===
+                    newName.toLowerCase()
+            );
+
+
+    if (existing) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Ce pseudo est déjà utilisé."
+        });
+
+        return;
+
+    }
+
+
+    user.username =
+        newName;
+
+
+    saveUsers();
+
+
+    if (ws.player) {
+
+        ws.player.name =
+            newName;
+
+    }
+
+
+    send(ws, {
+
+        type:
+            "username_changed",
+
+        username:
+            newName
+
+    });
+
+}
+
+
+// ============================================================
+// AMIS
+// ============================================================
+
+function sendFriendRequest(
+    ws,
+    data
+) {
+
+    const user =
+        getUser(ws);
+
+
+    if (!user) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Connecte-toi d'abord."
+        });
+
+        return;
+
+    }
+
+
+    const username =
+        cleanName(
+            data.username
+        );
+
+
+    const target =
+        Object.values(users)
+            .find(
+                other =>
+                    other.username
+                        .toLowerCase() ===
+                    username.toLowerCase()
+            );
+
+
+    if (!target) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Utilisateur introuvable."
+        });
+
+        return;
+
+    }
+
+
+    if (
+        target.id === user.id
+    ) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Tu ne peux pas t'ajouter toi-même."
+        });
+
+        return;
+
+    }
+
+
+    if (
+        user.friends.includes(
+            target.id
+        )
+    ) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Vous êtes déjà amis."
+        });
+
+        return;
+
+    }
+
+
+    if (
+        !target.friendRequests
+    ) {
+
+        target.friendRequests = [];
+
+    }
+
+
+    if (
+        target.friendRequests
+            .includes(user.id)
+    ) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Demande déjà envoyée."
+        });
+
+        return;
+
+    }
+
+
+    target.friendRequests.push(
+        user.id
     );
 
 
-// ============================================================
-// WEBSOCKET
-// ============================================================
+    saveUsers();
 
-const wss =
-    new WebSocket.Server({
-        server
+
+    send(ws, {
+
+        type:
+            "friend_request_sent",
+
+        username:
+            target.username
+
     });
+
+}
+
+
+function acceptFriendRequest(
+    ws,
+    data
+) {
+
+    const user =
+        getUser(ws);
+
+
+    if (!user) {
+        return;
+    }
+
+
+    const requestId =
+        String(
+            data.userId || ""
+        );
+
+
+    if (
+        !user.friendRequests
+            .includes(requestId)
+    ) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Demande introuvable."
+        });
+
+        return;
+
+    }
+
+
+    const other =
+        users[requestId];
+
+
+    if (!other) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Utilisateur introuvable."
+        });
+
+        return;
+
+    }
+
+
+    if (!user.friends.includes(
+        other.id
+    )) {
+
+        user.friends.push(
+            other.id
+        );
+
+    }
+
+
+    if (!other.friends.includes(
+        user.id
+    )) {
+
+        other.friends.push(
+            user.id
+        );
+
+    }
+
+
+    user.friendRequests =
+        user.friendRequests.filter(
+            id => id !== other.id
+        );
+
+
+    saveUsers();
+
+
+    send(ws, {
+
+        type:
+            "friend_added",
+
+        user:
+            publicUser(user)
+
+    });
+
+}
 
 
 // ============================================================
 // PARTIES
-// ============================================================
-
-const rooms =
-    new Map();
-
-
-// ============================================================
-// CRÉER CODE DE PARTIE
 // ============================================================
 
 function createRoomCode() {
@@ -387,9 +994,11 @@ function createRoomCode() {
 
     let code;
 
+
     do {
 
         code = "";
+
 
         for (
             let i = 0;
@@ -404,107 +1013,36 @@ function createRoomCode() {
                         chars.length
                     )
                 ];
+
         }
 
     } while (
         rooms.has(code)
     );
 
+
     return code;
+
 }
 
-
-// ============================================================
-// CRÉER PARTIE
-// ============================================================
-
-function createRoom(
-    options = {}
-) {
-
-    let code =
-        options.code ||
-        createRoomCode();
-
-    while (
-        rooms.has(code)
-    ) {
-
-        code =
-            createRoomCode();
-    }
-
-
-    const room = {
-
-        code,
-
-        private:
-            Boolean(
-                options.private
-            ),
-
-        password:
-            options.password || null,
-
-        players:
-            new Map(),
-
-        createdAt:
-            Date.now()
-    };
-
-
-    rooms.set(
-        code,
-        room
-    );
-
-
-    return room;
-}
-
-
-// ============================================================
-// TROUVER PARTIE RAPIDE
-// ============================================================
-
-function findQuickRoom() {
-
-    for (
-        const room
-        of rooms.values()
-    ) {
-
-        if (
-            room.private
-        ) {
-
-            continue;
-        }
-
-        if (
-            room.players.size <
-            MAX_PLAYERS_PER_ROOM
-        ) {
-
-            return room;
-        }
-    }
-
-
-    return createRoom();
-}
-
-
-// ============================================================
-// CRÉER JOUEUR
-// ============================================================
 
 function createPlayer(
     ws,
     data
 ) {
+
+    const user =
+        getUser(ws);
+
+
+    const selectedVehicle =
+        user &&
+        VEHICLES[
+            user.selectedVehicle
+        ]
+            ? user.selectedVehicle
+            : "car";
+
 
     let vehicle =
         data.vehicle;
@@ -515,24 +1053,9 @@ function createPlayer(
     ) {
 
         vehicle =
-            "car";
+            selectedVehicle;
+
     }
-
-
-    const latitude =
-        validNumber(
-            data.latitude
-        )
-            ? data.latitude
-            : 48.8566;
-
-
-    const longitude =
-        validNumber(
-            data.longitude
-        )
-            ? data.longitude
-            : 2.3522;
 
 
     return {
@@ -541,1100 +1064,85 @@ function createPlayer(
             createId(),
 
         userId:
-            ws.user
-                ? ws.user.id
-                : null,
+            ws.userId || null,
 
         name:
-            ws.user
-                ? ws.user.username
-                : cleanName(
-                    data.name
-                ),
+            user
+                ? user.username
+                : cleanName(data.name),
 
         vehicle,
 
         inVehicle:
             vehicle !== "walk",
 
-        latitude,
+        latitude:
+            validNumber(data.latitude)
+                ? data.latitude
+                : 48.8566,
 
-        longitude,
+        longitude:
+            validNumber(data.longitude)
+                ? data.longitude
+                : 2.3522,
 
-        rotation: 0,
+        rotation:
+            validNumber(data.rotation)
+                ? data.rotation
+                : 0,
 
         ws
+
     };
+
 }
 
 
 // ============================================================
-// CONNEXION
+// CRÉER SERVEUR PUBLIC
 // ============================================================
 
-wss.on(
-    "connection",
-    ws => {
-
-        console.log(
-            "👤 Nouveau joueur connecté"
-        );
-
-
-        ws.user =
-            null;
-
-        ws.player =
-            null;
-
-        ws.room =
-            null;
-
-
-        send(
-            ws,
-            {
-                type:
-                    "connected",
-
-                version:
-                    "2.0.0"
-            }
-        );
-
-
-        ws.on(
-            "message",
-            raw => {
-
-                let data;
-
-
-                try {
-
-                    data =
-                        JSON.parse(
-                            raw.toString()
-                        );
-
-                } catch {
-
-                    send(
-                        ws,
-                        {
-                            type:
-                                "error",
-
-                            message:
-                                "JSON invalide."
-                        }
-                    );
-
-                    return;
-                }
-
-
-                handleMessage(
-                    ws,
-                    data
-                );
-            }
-        );
-
-
-        ws.on(
-            "close",
-            () => {
-
-                removePlayer(
-                    ws
-                );
-            }
-        );
-
-
-        ws.on(
-            "error",
-            () => {
-
-                removePlayer(
-                    ws
-                );
-            }
-        );
-    }
-);
-
-
-// ============================================================
-// GESTION DES MESSAGES
-// ============================================================
-
-function handleMessage(
+function createRoom(
     ws,
-    data
+    data,
+    isQuickMatch = false
 ) {
 
-    switch (
-        data.type
-    ) {
+    if (ws.room) {
 
-        // ==============================
-        // COMPTES
-        // ==============================
-
-        case "register":
-            register(
-                ws,
-                data
-            );
-            break;
-
-
-        case "login":
-            login(
-                ws,
-                data
-            );
-            break;
-
-
-        case "logout":
-            logout(
-                ws
-            );
-            break;
-
-
-        case "change_username":
-            changeUsername(
-                ws,
-                data
-            );
-            break;
-
-
-        // ==============================
-        // AMIS
-        // ==============================
-
-        case "friend_request":
-            sendFriendRequest(
-                ws,
-                data
-            );
-            break;
-
-
-        case "friend_accept":
-            acceptFriendRequest(
-                ws,
-                data
-            );
-            break;
-
-
-        case "friend_decline":
-            declineFriendRequest(
-                ws,
-                data
-            );
-            break;
-
-
-        case "friends":
-            sendFriends(
-                ws
-            );
-            break;
-
-
-        // ==============================
-        // PARTIES
-        // ==============================
-
-        case "quick_play":
-            quickPlay(
-                ws,
-                data
-            );
-            break;
-
-
-        case "create_room":
-            createPrivateRoom(
-                ws,
-                data
-            );
-            break;
-
-
-        case "join_room":
-            joinRoom(
-                ws,
-                data
-            );
-            break;
-
-
-        case "leave_room":
-            removePlayer(
-                ws
-            );
-            break;
-
-
-        // ==============================
-        // JOUEUR
-        // ==============================
-
-        case "player_update":
-            updatePlayer(
-                ws,
-                data
-            );
-            break;
-
-
-        // ==============================
-        // VÉHICULE
-        // ==============================
-
-        case "enter_vehicle":
-            enterVehicle(
-                ws,
-                data
-            );
-            break;
-
-
-        case "exit_vehicle":
-            exitVehicle(
-                ws
-            );
-            break;
-
-
-        case "vehicle_update":
-            updateVehicle(
-                ws,
-                data
-            );
-            break;
-
-
-        case "buy_vehicle":
-            buyVehicle(
-                ws,
-                data
-            );
-            break;
-
-
-        // ==============================
-        // PING
-        // ==============================
-
-        case "ping":
-
-            send(
-                ws,
-                {
-                    type:
-                        "pong"
-                }
-            );
-
-            break;
-
-
-        default:
-
-            send(
-                ws,
-                {
-                    type:
-                        "error",
-
-                    message:
-                        "Type de message inconnu."
-                }
-            );
-    }
-}
-
-
-// ============================================================
-// INSCRIPTION
-// ============================================================
-
-function register(
-    ws,
-    data
-) {
-
-    if (
-        ws.user
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Tu es déjà connecté."
-            }
-        );
+        send(ws, {
+            type: "error",
+            message:
+                "Tu es déjà dans une partie."
+        });
 
         return;
+
     }
 
 
-    const username =
-        cleanUsername(
-            data.username
-        );
+    const roomCode =
+        createRoomCode();
 
 
-    const password =
-        String(
-            data.password || ""
-        );
+    const room = {
 
+        code:
+            roomCode,
 
-    if (
-        username.length < 3
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Le pseudo doit contenir au moins 3 caractères."
-            }
-        );
-
-        return;
-    }
-
-
-    if (
-        password.length < 6
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Le mot de passe doit contenir au moins 6 caractères."
-            }
-        );
-
-        return;
-    }
-
-
-    const exists =
-        users.find(
-            user =>
-                user.username ===
-                username
-        );
-
-
-    if (
-        exists
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Ce pseudo existe déjà."
-            }
-        );
-
-        return;
-    }
-
-
-    const user = {
-
-        id:
-            createId(),
-
-        username,
+        private:
+            false,
 
         password:
-            hashPassword(
-                password
-            ),
+            null,
 
-        friends: [],
+        players:
+            new Map(),
 
-        incomingRequests: [],
+        quickMatch:
+            isQuickMatch
 
-        outgoingRequests: [],
-
-        ownedVehicles: [
-            "car"
-        ],
-
-        money: 500,
-
-        createdAt:
-            Date.now()
     };
-
-
-    users.push(
-        user
-    );
-
-
-    saveUsers();
-
-
-    ws.user =
-        user;
-
-
-    sendUserData(
-        ws
-    );
-
-
-    console.log(
-        `🆕 Compte créé : ${username}`
-    );
-}
-
-
-// ============================================================
-// CONNEXION COMPTE
-// ============================================================
-
-function login(
-    ws,
-    data
-) {
-
-    const username =
-        cleanUsername(
-            data.username
-        );
-
-
-    const password =
-        String(
-            data.password || ""
-        );
-
-
-    const hashed =
-        hashPassword(
-            password
-        );
-
-
-    const user =
-        users.find(
-            u =>
-                u.username ===
-                    username &&
-                u.password ===
-                    hashed
-        );
-
-
-    if (
-        !user
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Pseudo ou mot de passe incorrect."
-            }
-        );
-
-        return;
-    }
-
-
-    ws.user =
-        user;
-
-
-    sendUserData(
-        ws
-    );
-
-
-    console.log(
-        `🔑 ${username} connecté`
-    );
-}
-
-
-// ============================================================
-// DONNÉES UTILISATEUR
-// ============================================================
-
-function sendUserData(
-    ws
-) {
-
-    if (
-        !ws.user
-    ) {
-
-        return;
-    }
-
-
-    send(
-        ws,
-        {
-
-            type:
-                "login_success",
-
-            user: {
-
-                id:
-                    ws.user.id,
-
-                username:
-                    ws.user.username,
-
-                friends:
-                    ws.user.friends,
-
-                incomingRequests:
-                    ws.user.incomingRequests,
-
-                outgoingRequests:
-                    ws.user.outgoingRequests,
-
-                ownedVehicles:
-                    ws.user.ownedVehicles,
-
-                money:
-                    ws.user.money
-            }
-
-        }
-    );
-}
-
-
-// ============================================================
-// DÉCONNEXION
-// ============================================================
-
-function logout(
-    ws
-) {
-
-    ws.user =
-        null;
-
-
-    send(
-        ws,
-        {
-            type:
-                "logout_success"
-        }
-    );
-}
-
-
-// ============================================================
-// CHANGER PSEUDO
-// ============================================================
-
-function changeUsername(
-    ws,
-    data
-) {
-
-    if (
-        !ws.user
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Connecte-toi d'abord."
-            }
-        );
-
-        return;
-    }
-
-
-    const newUsername =
-        cleanUsername(
-            data.username
-        );
-
-
-    if (
-        newUsername.length < 3
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Pseudo invalide."
-            }
-        );
-
-        return;
-    }
-
-
-    const exists =
-        users.find(
-            user =>
-                user.username ===
-                    newUsername &&
-                user.id !==
-                    ws.user.id
-        );
-
-
-    if (
-        exists
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Ce pseudo est déjà utilisé."
-            }
-        );
-
-        return;
-    }
-
-
-    ws.user.username =
-        newUsername;
-
-
-    saveUsers();
-
-
-    sendUserData(
-        ws
-    );
-}
-
-
-// ============================================================
-// TROUVER UTILISATEUR
-// ============================================================
-
-function findUserByUsername(
-    username
-) {
-
-    username =
-        cleanUsername(
-            username
-        );
-
-
-    return users.find(
-        user =>
-            user.username ===
-            username
-    );
-}
-
-
-// ============================================================
-// DEMANDE D'AMI
-// ============================================================
-
-function sendFriendRequest(
-    ws,
-    data
-) {
-
-    if (
-        !ws.user
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Connecte-toi d'abord."
-            }
-        );
-
-        return;
-    }
-
-
-    const target =
-        findUserByUsername(
-            data.username
-        );
-
-
-    if (
-        !target
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Joueur introuvable."
-            }
-        );
-
-        return;
-    }
-
-
-    if (
-        target.id ===
-        ws.user.id
-    ) {
-
-        return;
-    }
-
-
-    if (
-        ws.user.friends.includes(
-            target.id
-        )
-    ) {
-
-        return;
-    }
-
-
-    if (
-        target.incomingRequests.includes(
-            ws.user.id
-        )
-    ) {
-
-        return;
-    }
-
-
-    target.incomingRequests.push(
-        ws.user.id
-    );
-
-
-    ws.user.outgoingRequests.push(
-        target.id
-    );
-
-
-    saveUsers();
-
-
-    send(
-        ws,
-        {
-            type:
-                "friend_request_sent",
-
-            username:
-                target.username
-        }
-    );
-}
-
-
-// ============================================================
-// ACCEPTER AMI
-// ============================================================
-
-function acceptFriendRequest(
-    ws,
-    data
-) {
-
-    if (
-        !ws.user
-    ) {
-
-        return;
-    }
-
-
-    const requester =
-        findUserByUsername(
-            data.username
-        );
-
-
-    if (
-        !requester
-    ) {
-
-        return;
-    }
-
-
-    if (
-        !ws.user.incomingRequests.includes(
-            requester.id
-        )
-    ) {
-
-        return;
-    }
-
-
-    ws.user.incomingRequests =
-        ws.user.incomingRequests.filter(
-            id =>
-                id !==
-                requester.id
-        );
-
-
-    requester.outgoingRequests =
-        requester.outgoingRequests.filter(
-            id =>
-                id !==
-                ws.user.id
-        );
-
-
-    if (
-        !ws.user.friends.includes(
-            requester.id
-        )
-    ) {
-
-        ws.user.friends.push(
-            requester.id
-        );
-    }
-
-
-    if (
-        !requester.friends.includes(
-            ws.user.id
-        )
-    ) {
-
-        requester.friends.push(
-            ws.user.id
-        );
-    }
-
-
-    saveUsers();
-
-
-    sendUserData(
-        ws
-    );
-}
-
-
-// ============================================================
-// REFUSER AMI
-// ============================================================
-
-function declineFriendRequest(
-    ws,
-    data
-) {
-
-    if (
-        !ws.user
-    ) {
-
-        return;
-    }
-
-
-    const requester =
-        findUserByUsername(
-            data.username
-        );
-
-
-    if (
-        !requester
-    ) {
-
-        return;
-    }
-
-
-    ws.user.incomingRequests =
-        ws.user.incomingRequests.filter(
-            id =>
-                id !==
-                requester.id
-        );
-
-
-    requester.outgoingRequests =
-        requester.outgoingRequests.filter(
-            id =>
-                id !==
-                ws.user.id
-        );
-
-
-    saveUsers();
-
-
-    sendUserData(
-        ws
-    );
-}
-
-
-// ============================================================
-// LISTE AMIS
-// ============================================================
-
-function sendFriends(
-    ws
-) {
-
-    if (
-        !ws.user
-    ) {
-
-        return;
-    }
-
-
-    const friends =
-        ws.user.friends.map(
-            id => {
-
-                const user =
-                    users.find(
-                        u =>
-                            u.id ===
-                            id
-                    );
-
-
-                if (!user)
-                    return null;
-
-
-                return {
-
-                    id:
-                        user.id,
-
-                    username:
-                        user.username
-                };
-            }
-        ).filter(Boolean);
-
-
-    send(
-        ws,
-        {
-
-            type:
-                "friends",
-
-            friends
-        }
-    );
-}
-
-
-// ============================================================
-// PARTIE RAPIDE
-// ============================================================
-
-function quickPlay(
-    ws,
-    data
-) {
-
-    if (
-        ws.room
-    ) {
-
-        removePlayer(
-            ws
-        );
-    }
-
-
-    const room =
-        findQuickRoom();
-
-
-    if (
-        room.players.size >=
-        MAX_PLAYERS_PER_ROOM
-    ) {
-
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "La partie est pleine."
-            }
-        );
-
-        return;
-    }
 
 
     const player =
@@ -1650,6 +1158,12 @@ function quickPlay(
     );
 
 
+    rooms.set(
+        roomCode,
+        room
+    );
+
+
     ws.player =
         player;
 
@@ -1657,43 +1171,30 @@ function quickPlay(
         room;
 
 
-    send(
-        ws,
-        {
+    send(ws, {
 
-            type:
-                "room_joined",
+        type:
+            "room_created",
 
-            mode:
-                "quick",
+        room:
+            roomCode,
 
-            room:
-                room.code,
+        private:
+            false,
 
-            playerId:
-                player.id,
+        playerId:
+            player.id,
 
-            players:
-                getPlayers(room)
-        }
+        players:
+            getPlayers(room)
+
+    });
+
+
+    console.log(
+        `🏠 Partie ${roomCode} créée`
     );
 
-
-    broadcast(
-        room,
-        {
-
-            type:
-                "player_joined",
-
-            player:
-                publicPlayer(
-                    player
-                )
-
-        },
-        ws
-    );
 }
 
 
@@ -1706,100 +1207,74 @@ function createPrivateRoom(
     data
 ) {
 
+    const password =
+        cleanPassword(
+            data.password
+        );
+
+
     if (
-        ws.room
+        password.length < 1
     ) {
 
-        removePlayer(
-            ws
-        );
+        send(ws, {
+            type: "error",
+            message:
+                "Entre un mot de passe."
+        });
+
+        return;
+
     }
 
 
-    const password =
-        String(
-            data.password || ""
-        );
-
-
-    if (
-        password.length < 3
+    if (password.length >
+        MAX_PASSWORD_LENGTH
     ) {
 
-        send(
-            ws,
-            {
-                type:
-                    "error",
+        send(ws, {
+            type: "error",
+            message:
+                "Mot de passe trop long."
+        });
 
-                message:
-                    "Le mot de passe doit contenir au moins 3 caractères."
-            }
-        );
+        return;
 
+    }
+
+
+    createRoom(
+        ws,
+        data,
+        false
+    );
+
+
+    if (!ws.room) {
         return;
     }
 
 
-    const room =
-        createRoom({
-
-            private:
-                true,
-
-            password:
-                password
-        });
+    ws.room.private =
+        true;
 
 
-    const player =
-        createPlayer(
-            ws,
-            data
+    ws.room.password =
+        hashPassword(
+            password
         );
 
 
-    room.players.set(
-        player.id,
-        player
-    );
+    send(ws, {
 
+        type:
+            "private_room_created",
 
-    ws.player =
-        player;
+        room:
+            ws.room.code
 
-    ws.room =
-        room;
+    });
 
-
-    send(
-        ws,
-        {
-
-            type:
-                "room_created",
-
-            private:
-                true,
-
-            room:
-                room.code,
-
-            password:
-                password,
-
-            playerId:
-                player.id,
-
-            players:
-                getPlayers(room)
-        }
-    );
-
-
-    console.log(
-        `🔒 Serveur privé ${room.code} créé`
-    );
 }
 
 
@@ -1812,13 +1287,16 @@ function joinRoom(
     data
 ) {
 
-    if (
-        ws.room
-    ) {
+    if (ws.room) {
 
-        removePlayer(
-            ws
-        );
+        send(ws, {
+            type: "error",
+            message:
+                "Tu es déjà dans une partie."
+        });
+
+        return;
+
     }
 
 
@@ -1831,70 +1309,63 @@ function joinRoom(
 
 
     const room =
-        rooms.get(
-            code
-        );
+        rooms.get(code);
 
 
-    if (
-        !room
-    ) {
+    if (!room) {
 
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Serveur introuvable."
-            }
-        );
+        send(ws, {
+            type: "error",
+            message:
+                "Cette partie n'existe pas."
+        });
 
         return;
+
     }
 
 
     if (
-        room.private &&
-        room.password !==
-            String(
-                data.password || ""
-            )
+        room.private
     ) {
 
-        send(
-            ws,
-            {
-                type:
-                    "error",
+        const password =
+            cleanPassword(
+                data.password
+            );
 
+
+        if (
+            hashPassword(password) !==
+            room.password
+        ) {
+
+            send(ws, {
+                type: "error",
                 message:
                     "Mot de passe incorrect."
-            }
-        );
+            });
 
-        return;
+            return;
+
+        }
+
     }
 
 
     if (
         room.players.size >=
-        MAX_PLAYERS_PER_ROOM
+        MAX_PLAYERS
     ) {
 
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Serveur complet."
-            }
-        );
+        send(ws, {
+            type: "error",
+            message:
+                "Cette partie est pleine."
+        });
 
         return;
+
     }
 
 
@@ -1918,12 +1389,179 @@ function joinRoom(
         room;
 
 
-    send(
-        ws,
+    send(ws, {
+
+        type:
+            "room_joined",
+
+        room:
+            room.code,
+
+        private:
+            room.private,
+
+        playerId:
+            player.id,
+
+        players:
+            getPlayers(room)
+
+    });
+
+
+    broadcast(
+        room,
         {
+            type:
+                "player_joined",
+
+            player:
+                publicPlayer(player)
+        },
+        ws
+    );
+
+
+    console.log(
+        `👤 ${player.name} rejoint ${room.code}`
+    );
+
+}
+
+
+// ============================================================
+// PARTIE RAPIDE
+// ============================================================
+
+function quickMatch(
+    ws,
+    data
+) {
+
+    if (ws.room) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Tu es déjà dans une partie."
+        });
+
+        return;
+
+    }
+
+
+    quickMatchQueue.add(ws);
+
+
+    send(ws, {
+
+        type:
+            "quick_match_searching"
+
+    });
+
+
+    tryCreateQuickMatch();
+
+}
+
+
+function tryCreateQuickMatch() {
+
+    const available =
+        [...quickMatchQueue]
+            .filter(
+                ws =>
+                    ws.readyState ===
+                        WebSocket.OPEN &&
+                    !ws.room
+            );
+
+
+    if (
+        available.length < 2
+    ) {
+
+        return;
+
+    }
+
+
+    const players =
+        available.slice(
+            0,
+            MAX_PLAYERS
+        );
+
+
+    players.forEach(
+        ws =>
+            quickMatchQueue.delete(ws)
+    );
+
+
+    const first =
+        players[0];
+
+
+    createRoom(
+        first,
+        {},
+        true
+    );
+
+
+    if (!first.room) {
+        return;
+    }
+
+
+    const room =
+        first.room;
+
+
+    for (
+        let i = 1;
+        i < players.length;
+        i++
+    ) {
+
+        const ws =
+            players[i];
+
+
+        if (
+            ws.room
+        ) {
+            continue;
+        }
+
+
+        const player =
+            createPlayer(
+                ws,
+                {}
+            );
+
+
+        room.players.set(
+            player.id,
+            player
+        );
+
+
+        ws.player =
+            player;
+
+        ws.room =
+            room;
+
+
+        send(ws, {
 
             type:
-                "room_joined",
+                "quick_match_found",
 
             room:
                 room.code,
@@ -1933,25 +1571,45 @@ function joinRoom(
 
             players:
                 getPlayers(room)
+
+        });
+
+
+        broadcast(
+            room,
+            {
+                type:
+                    "player_joined",
+
+                player:
+                    publicPlayer(player)
+            },
+            ws
+        );
+
+    }
+
+
+    send(
+        first,
+        {
+
+            type:
+                "quick_match_found",
+
+            room:
+                room.code,
+
+            playerId:
+                first.player.id,
+
+            players:
+                getPlayers(room)
+
         }
     );
 
 
-    broadcast(
-        room,
-        {
-
-            type:
-                "player_joined",
-
-            player:
-                publicPlayer(
-                    player
-                )
-
-        },
-        ws
-    );
 }
 
 
@@ -1970,46 +1628,40 @@ function updatePlayer(
     ) {
 
         return;
+
     }
 
 
     if (
-        validNumber(
-            data.latitude
-        )
+        !validNumber(data.latitude) ||
+        !validNumber(data.longitude)
     ) {
 
-        ws.player.latitude =
-            data.latitude;
+        return;
+
     }
 
 
-    if (
-        validNumber(
-            data.longitude
-        )
-    ) {
+    ws.player.latitude =
+        data.latitude;
 
-        ws.player.longitude =
-            data.longitude;
-    }
+    ws.player.longitude =
+        data.longitude;
 
 
     if (
-        validNumber(
-            data.rotation
-        )
+        validNumber(data.rotation)
     ) {
 
         ws.player.rotation =
             data.rotation;
+
     }
 
 
     broadcast(
         ws.room,
         {
-
             type:
                 "player_update",
 
@@ -2017,10 +1669,101 @@ function updatePlayer(
                 publicPlayer(
                     ws.player
                 )
-
         },
         ws
     );
+
+}
+
+
+// ============================================================
+// CHANGEMENT DE VÉHICULE
+// ============================================================
+
+function updateVehicle(
+    ws,
+    data
+) {
+
+    if (
+        !ws.player ||
+        !ws.room
+    ) {
+
+        return;
+
+    }
+
+
+    const vehicle =
+        data.vehicle;
+
+
+    if (
+        !VEHICLES[vehicle]
+    ) {
+
+        return;
+
+    }
+
+
+    const user =
+        getUser(ws);
+
+
+    if (
+        user &&
+        !user.vehicles.includes(
+            vehicle
+        )
+    ) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Tu ne possèdes pas ce véhicule."
+        });
+
+        return;
+
+    }
+
+
+    ws.player.vehicle =
+        vehicle;
+
+    ws.player.inVehicle =
+        vehicle !== "walk";
+
+
+    if (user) {
+
+        user.selectedVehicle =
+            vehicle;
+
+        saveUsers();
+
+    }
+
+
+    broadcast(
+        ws.room,
+        {
+            type:
+                "vehicle_update",
+
+            playerId:
+                ws.player.id,
+
+            vehicle,
+
+            inVehicle:
+                ws.player.inVehicle
+
+        }
+    );
+
 }
 
 
@@ -2034,50 +1777,29 @@ function enterVehicle(
 ) {
 
     if (
-        !ws.player
+        !ws.player ||
+        !ws.room
     ) {
-
         return;
     }
 
 
-    if (
-        !VEHICLES[data.vehicle]
-    ) {
-
-        return;
-    }
-
-
-    const user =
-        ws.user;
+    const vehicle =
+        data.vehicle;
 
 
     if (
-        user &&
-        !user.ownedVehicles.includes(
-            data.vehicle
-        )
+        !VEHICLES[vehicle] ||
+        vehicle === "walk"
     ) {
 
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Tu ne possèdes pas ce véhicule."
-            }
-        );
-
         return;
+
     }
 
 
     ws.player.vehicle =
-        data.vehicle;
-
+        vehicle;
 
     ws.player.inVehicle =
         true;
@@ -2086,17 +1808,17 @@ function enterVehicle(
     broadcast(
         ws.room,
         {
-
             type:
-                "player_vehicle_enter",
+                "vehicle_enter",
 
-            player:
-                publicPlayer(
-                    ws.player
-                )
+            playerId:
+                ws.player.id,
+
+            vehicle
 
         }
     );
+
 }
 
 
@@ -2109,116 +1831,93 @@ function exitVehicle(
 ) {
 
     if (
-        !ws.player
+        !ws.player ||
+        !ws.room
     ) {
-
         return;
     }
 
+
+    ws.player.vehicle =
+        "walk";
 
     ws.player.inVehicle =
         false;
 
 
-    ws.player.vehicle =
-        "walk";
-
-
     broadcast(
         ws.room,
         {
-
             type:
-                "player_vehicle_exit",
+                "vehicle_exit",
 
-            player:
-                publicPlayer(
-                    ws.player
-                )
+            playerId:
+                ws.player.id
 
         }
     );
+
 }
 
 
 // ============================================================
-// CHANGER DE VÉHICULE
+// PARAMÈTRES
 // ============================================================
 
-function updateVehicle(
+function updateSettings(
     ws,
     data
 ) {
 
-    if (
-        !ws.player
-    ) {
+    const user =
+        getUser(ws);
 
+
+    if (!user) {
         return;
     }
 
 
     if (
-        !VEHICLES[data.vehicle]
+        typeof data.sound ===
+        "boolean"
     ) {
 
-        return;
+        user.settings.sound =
+            data.sound;
+
     }
 
 
     if (
-        ws.user &&
-        !ws.user.ownedVehicles.includes(
-            data.vehicle
-        )
+        typeof data.music ===
+        "boolean"
     ) {
 
-        send(
-            ws,
-            {
-                type:
-                    "error",
+        user.settings.music =
+            data.music;
 
-                message:
-                    "Véhicule non acheté."
-            }
-        );
-
-        return;
     }
 
 
-    ws.player.vehicle =
-        data.vehicle;
+    saveUsers();
 
 
-    ws.player.inVehicle =
-        data.vehicle !==
-        "walk";
+    send(ws, {
 
+        type:
+            "settings_updated",
 
-    broadcast(
-        ws.room,
-        {
+        settings:
+            user.settings
 
-            type:
-                "vehicle_update",
+    });
 
-            playerId:
-                ws.player.id,
-
-            vehicle:
-                data.vehicle,
-
-            inVehicle:
-                ws.player.inVehicle
-        }
-    );
 }
 
 
 // ============================================================
-// ACHETER UN VÉHICULE
+// MAGASIN
 // ============================================================
 
 function buyVehicle(
@@ -2226,92 +1925,97 @@ function buyVehicle(
     data
 ) {
 
-    if (
-        !ws.user
-    ) {
+    const user =
+        getUser(ws);
 
-        send(
-            ws,
-            {
-                type:
-                    "error",
 
-                message:
-                    "Connecte-toi pour acheter un véhicule."
-            }
-        );
+    if (!user) {
+
+        send(ws, {
+            type: "error",
+            message:
+                "Connecte-toi d'abord."
+        });
 
         return;
+
     }
 
 
     const vehicle =
-        VEHICLES[data.vehicle];
+        data.vehicle;
 
 
     if (
-        !vehicle
+        !VEHICLES[vehicle]
     ) {
 
+        send(ws, {
+            type: "error",
+            message:
+                "Véhicule inconnu."
+        });
+
         return;
+
     }
 
 
     if (
-        ws.user.ownedVehicles.includes(
-            data.vehicle
+        user.vehicles.includes(
+            vehicle
         )
     ) {
 
+        send(ws, {
+            type: "error",
+            message:
+                "Tu possèdes déjà ce véhicule."
+        });
+
         return;
+
     }
 
 
-    if (
-        ws.user.money <
-        vehicle.price
-    ) {
+    // Pour l'instant les véhicules
+    // sont gratuits dans la V2.
 
-        send(
-            ws,
-            {
-                type:
-                    "error",
-
-                message:
-                    "Tu n'as pas assez d'argent."
-            }
-        );
-
-        return;
-    }
-
-
-    ws.user.money -=
-        vehicle.price;
-
-
-    ws.user.ownedVehicles.push(
-        data.vehicle
+    user.vehicles.push(
+        vehicle
     );
 
 
     saveUsers();
 
 
-    sendUserData(
-        ws
-    );
+    send(ws, {
+
+        type:
+            "vehicle_purchased",
+
+        vehicle,
+
+        vehicles:
+            user.vehicles
+
+    });
+
 }
 
 
 // ============================================================
-// QUITTER UNE PARTIE
+// SUPPRIMER UN JOUEUR
 // ============================================================
 
 function removePlayer(
     ws
 ) {
+
+    quickMatchQueue.delete(
+        ws
+    );
+
 
     if (
         !ws.player ||
@@ -2319,12 +2023,12 @@ function removePlayer(
     ) {
 
         return;
+
     }
 
 
     const room =
         ws.room;
-
 
     const player =
         ws.player;
@@ -2338,22 +2042,18 @@ function removePlayer(
     broadcast(
         room,
         {
-
             type:
                 "player_left",
 
             playerId:
                 player.id
-
         }
     );
 
 
-    ws.player =
-        null;
-
-    ws.room =
-        null;
+    console.log(
+        `👋 ${player.name} a quitté ${room.code}`
+    );
 
 
     if (
@@ -2368,20 +2068,218 @@ function removePlayer(
         console.log(
             `🗑️ Partie ${room.code} supprimée`
         );
+
     }
+
+
+    ws.player =
+        null;
+
+    ws.room =
+        null;
+
 }
 
 
 // ============================================================
-// HEARTBEAT
+// GESTION DES MESSAGES
+// ============================================================
+
+function handleMessage(
+    ws,
+    data
+) {
+
+    if (
+        !data ||
+        typeof data.type !==
+            "string"
+    ) {
+
+        return;
+
+    }
+
+
+    switch (
+        data.type
+    ) {
+
+        case "register":
+            registerAccount(
+                ws,
+                data
+            );
+            break;
+
+
+        case "login":
+            loginAccount(
+                ws,
+                data
+            );
+            break;
+
+
+        case "change_username":
+            changeUsername(
+                ws,
+                data
+            );
+            break;
+
+
+        case "friend_request":
+            sendFriendRequest(
+                ws,
+                data
+            );
+            break;
+
+
+        case "friend_accept":
+            acceptFriendRequest(
+                ws,
+                data
+            );
+            break;
+
+
+        case "create_room":
+            createRoom(
+                ws,
+                data
+            );
+            break;
+
+
+        case "create_private_room":
+            createPrivateRoom(
+                ws,
+                data
+            );
+            break;
+
+
+        case "join_room":
+            joinRoom(
+                ws,
+                data
+            );
+            break;
+
+
+        case "quick_match":
+            quickMatch(
+                ws,
+                data
+            );
+            break;
+
+
+        case "player_update":
+            updatePlayer(
+                ws,
+                data
+            );
+            break;
+
+
+        case "vehicle_update":
+            updateVehicle(
+                ws,
+                data
+            );
+            break;
+
+
+        case "enter_vehicle":
+            enterVehicle(
+                ws,
+                data
+            );
+            break;
+
+
+        case "exit_vehicle":
+            exitVehicle(
+                ws
+            );
+            break;
+
+
+        case "buy_vehicle":
+            buyVehicle(
+                ws,
+                data
+            );
+            break;
+
+
+        case "settings_update":
+            updateSettings(
+                ws,
+                data
+            );
+            break;
+
+
+        case "ping":
+
+            send(ws, {
+                type:
+                    "pong"
+            });
+
+            break;
+
+
+        default:
+
+            send(ws, {
+                type:
+                    "error",
+
+                message:
+                    "Type de message inconnu."
+            });
+
+    }
+
+}
+
+
+// ============================================================
+// CONNEXIONS
 // ============================================================
 
 wss.on(
     "connection",
     ws => {
 
+        console.log(
+            "👤 Nouveau joueur connecté"
+        );
+
+
+        ws.userId =
+            null;
+
+        ws.player =
+            null;
+
+        ws.room =
+            null;
+
+
         ws.isAlive =
             true;
+
+
+        send(ws, {
+            type:
+                "connected"
+        });
 
 
         ws.on(
@@ -2390,11 +2288,76 @@ wss.on(
 
                 ws.isAlive =
                     true;
+
             }
         );
+
+
+        ws.on(
+            "message",
+            raw => {
+
+                try {
+
+                    const data =
+                        JSON.parse(
+                            raw.toString()
+                        );
+
+
+                    handleMessage(
+                        ws,
+                        data
+                    );
+
+                } catch {
+
+                    send(ws, {
+
+                        type:
+                            "error",
+
+                        message:
+                            "Message JSON invalide."
+
+                    });
+
+                }
+
+            }
+        );
+
+
+        ws.on(
+            "close",
+            () => {
+
+                removePlayer(
+                    ws
+                );
+
+            }
+        );
+
+
+        ws.on(
+            "error",
+            () => {
+
+                removePlayer(
+                    ws
+                );
+
+            }
+        );
+
     }
 );
 
+
+// ============================================================
+// HEARTBEAT
+// ============================================================
 
 setInterval(
     () => {
@@ -2410,6 +2373,7 @@ setInterval(
                     ws.terminate();
 
                     return;
+
                 }
 
 
@@ -2418,6 +2382,7 @@ setInterval(
 
 
                 ws.ping();
+
             }
         );
 
@@ -2427,43 +2392,17 @@ setInterval(
 
 
 // ============================================================
-// NETTOYAGE DES PARTIES VIDES
+// NETTOYAGE DES PARTIES RAPIDES
 // ============================================================
 
 setInterval(
-    () => {
-
-        const now =
-            Date.now();
-
-
-        for (
-            const [
-                code,
-                room
-            ]
-            of rooms
-        ) {
-
-            if (
-                room.players.size === 0 &&
-                now - room.createdAt >
-                    5 * 60 * 1000
-            ) {
-
-                rooms.delete(
-                    code
-                );
-            }
-        }
-
-    },
-    60000
+    tryCreateQuickMatch,
+    2000
 );
 
 
 // ============================================================
-// LANCEMENT
+// DÉMARRAGE
 // ============================================================
 
 server.listen(
@@ -2472,39 +2411,8 @@ server.listen(
     () => {
 
         console.log(
-            "======================================"
+            `🚀 RoadGame V2 lancé sur le port ${PORT}`
         );
 
-        console.log(
-            "🚗 ROADGAME SERVER V2"
-        );
-
-        console.log(
-            "======================================"
-        );
-
-        console.log(
-            `🚀 Serveur lancé sur le port ${PORT}`
-        );
-
-        console.log(
-            `👥 Utilisateurs : ${users.length}`
-        );
-
-        console.log(
-            "🎮 Multijoueur : ACTIVÉ"
-        );
-
-        console.log(
-            "🔒 Serveurs privés : ACTIVÉS"
-        );
-
-        console.log(
-            "👥 Amis : ACTIVÉS"
-        );
-
-        console.log(
-            "🚗 Véhicules : ACTIVÉS"
-        );
     }
 );
