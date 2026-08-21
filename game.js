@@ -1,6 +1,6 @@
 // ============================================================
-// ROADGAME
-// Carte réelle + 3D + joystick + mini-carte + multijoueur UI
+// ROADGAME - GAME.JS
+// Carte réelle + monde 3D + joystick + caméra + carte zoomable
 // ============================================================
 
 const NOMINATIM =
@@ -36,7 +36,28 @@ let multiplayerSocket = null;
 
 
 // ============================================================
-// ELEMENTS
+// CARTE
+// ============================================================
+
+let mapZoom = 0.055;
+
+let mapOffsetX = 0;
+let mapOffsetY = 0;
+
+let mapDragging = false;
+
+let mapPinching = false;
+
+let mapLastX = 0;
+let mapLastY = 0;
+
+let mapStartDistance = 0;
+
+let mapStartZoom = 0;
+
+
+// ============================================================
+// ELEMENTS HTML
 // ============================================================
 
 const game =
@@ -89,13 +110,14 @@ const multi =
 
 
 // ============================================================
-// LANCER
+// LANCER LA PARTIE
 // ============================================================
 
 play.addEventListener(
     "click",
     startGame
 );
+
 
 locationInput.addEventListener(
     "keydown",
@@ -104,6 +126,7 @@ locationInput.addEventListener(
         if (event.key === "Enter") {
             startGame();
         }
+
     }
 );
 
@@ -113,6 +136,7 @@ async function startGame() {
     const query =
         locationInput.value.trim();
 
+
     if (!query) {
 
         message.textContent =
@@ -121,22 +145,28 @@ async function startGame() {
         return;
     }
 
+
     loading.style.display =
         "flex";
+
 
     try {
 
         loadingText.textContent =
             "📍 Recherche de " + query;
 
+
         const place =
             await geocode(query);
 
+
         if (!place) {
+
             throw new Error(
-                "Adresse ou ville introuvable."
+                "Ville ou adresse introuvable."
             );
         }
+
 
         centerLat =
             Number(place.lat);
@@ -146,7 +176,7 @@ async function startGame() {
 
 
         loadingText.textContent =
-            "🛣️ Téléchargement des routes...";
+            "🛣️ Recherche des routes et bâtiments...";
 
 
         const data =
@@ -166,9 +196,11 @@ async function startGame() {
 
         initThree();
 
+
         buildWorld(
             data
         );
+
 
         createPlayer();
 
@@ -176,16 +208,20 @@ async function startGame() {
         menu.style.display =
             "none";
 
+
         hud.style.display =
             "block";
 
+
         joystick.style.display =
             "block";
+
 
         document.getElementById(
             "cameraButtons"
         ).style.display =
             "block";
+
 
         document.getElementById(
             "vehiclePanel"
@@ -205,6 +241,16 @@ async function startGame() {
             true;
 
 
+        mapZoom =
+            0.055;
+
+        mapOffsetX =
+            0;
+
+        mapOffsetY =
+            0;
+
+
         resizeMaps();
 
         drawMiniMap();
@@ -218,14 +264,17 @@ async function startGame() {
 
         console.error(error);
 
+
         message.textContent =
             "❌ " +
             error.message;
+
 
         alert(
             "Impossible de générer cette map.\n\n" +
             error.message
         );
+
 
     } finally {
 
@@ -236,7 +285,7 @@ async function startGame() {
 
 
 // ============================================================
-// GÉOCODAGE
+// RECHERCHE DE L'ADRESSE
 // ============================================================
 
 async function geocode(query) {
@@ -246,9 +295,7 @@ async function geocode(query) {
         "?format=jsonv2" +
         "&limit=1" +
         "&q=" +
-        encodeURIComponent(
-            query
-        );
+        encodeURIComponent(query);
 
 
     const response =
@@ -281,7 +328,7 @@ async function geocode(query) {
 
 
 // ============================================================
-// OSM
+// RÉCUPÉRER LES DONNÉES OPENSTREETMAP
 // ============================================================
 
 async function getOSMData(
@@ -321,10 +368,12 @@ out body geom;
             OVERPASS,
             {
                 method:"POST",
+
                 headers:{
                     "Content-Type":
                         "text/plain"
                 },
+
                 body:query
             }
         );
@@ -333,7 +382,7 @@ out body geom;
     if (!response.ok) {
 
         throw new Error(
-            "Impossible de récupérer les données de la carte."
+            "Impossible de récupérer la carte."
         );
     }
 
@@ -347,7 +396,7 @@ out body geom;
 
 
 // ============================================================
-// THREE
+// INITIALISER THREE.JS
 // ============================================================
 
 function initThree() {
@@ -384,8 +433,9 @@ function initThree() {
     camera =
         new THREE.PerspectiveCamera(
             65,
-            innerWidth / innerHeight,
-            .1,
+            innerWidth /
+            innerHeight,
+            0.1,
             2500
         );
 
@@ -415,6 +465,7 @@ function initThree() {
 
 
     game.innerHTML = "";
+
 
     game.appendChild(
         renderer.domElement
@@ -459,7 +510,7 @@ function initThree() {
 
 
 // ============================================================
-// GPS -> 3D
+// GPS -> COORDONNÉES 3D
 // ============================================================
 
 function gpsToWorld(
@@ -481,19 +532,20 @@ function gpsToWorld(
 
 
     return {
+
         x:
-            (lon - centerLon)
-            * metersLon,
+            (lon - centerLon) *
+            metersLon,
 
         z:
-            -(lat - centerLat)
-            * metersLat
+            -(lat - centerLat) *
+            metersLat
     };
 }
 
 
 // ============================================================
-// MONDE
+// CONSTRUIRE LE MONDE
 // ============================================================
 
 function buildWorld(
@@ -506,6 +558,7 @@ function buildWorld(
                 2500,
                 2500
             ),
+
             new THREE.MeshStandardMaterial({
                 color:0x5b9b52,
                 roughness:1
@@ -534,6 +587,7 @@ function buildWorld(
             element.type !== "way" ||
             !element.geometry
         ) {
+
             continue;
         }
 
@@ -572,7 +626,8 @@ function createRoad(
     way
 ) {
 
-    const valid = [
+    const validRoads = [
+
         "motorway",
         "trunk",
         "primary",
@@ -582,19 +637,22 @@ function createRoad(
         "living_street",
         "unclassified",
         "service"
+
     ];
 
 
     if (
-        !valid.includes(
+        !validRoads.includes(
             way.tags.highway
         )
     ) {
+
         return;
     }
 
 
-    let width = 5;
+    let width =
+        5;
 
 
     switch (
@@ -603,42 +661,57 @@ function createRoad(
 
         case "motorway":
         case "trunk":
-            width = 12;
+
+            width =
+                12;
+
             break;
+
 
         case "primary":
-            width = 9;
+
+            width =
+                9;
+
             break;
+
 
         case "secondary":
-            width = 8;
+
+            width =
+                8;
+
             break;
 
+
         case "tertiary":
-            width = 7;
+
+            width =
+                7;
+
             break;
     }
 
 
     const points =
         way.geometry.map(
-            p =>
+            point =>
                 gpsToWorld(
-                    p.lat,
-                    p.lon
+                    point.lat,
+                    point.lon
                 )
         );
 
 
     for (
-        let i=0;
-        i<points.length-1;
+        let i = 0;
+        i < points.length - 1;
         i++
     ) {
 
         createRoadSegment(
             points[i],
-            points[i+1],
+            points[i + 1],
             width
         );
     }
@@ -654,42 +727,50 @@ function createRoadSegment(
     const dx =
         b.x - a.x;
 
+
     const dz =
         b.z - a.z;
 
 
     const length =
         Math.sqrt(
-            dx*dx +
-            dz*dz
+            dx * dx +
+            dz * dz
         );
 
 
     if (
-        length < .5
+        length < 0.5
     ) {
+
         return;
     }
 
 
     const road =
         new THREE.Mesh(
+
             new THREE.BoxGeometry(
                 width,
-                .12,
+                0.12,
                 length
             ),
+
             new THREE.MeshStandardMaterial({
                 color:0x3b3b3b,
-                roughness:.9
+                roughness:0.9
             })
         );
 
 
     road.position.set(
-        (a.x+b.x)/2,
-        .06,
-        (a.z+b.z)/2
+
+        (a.x + b.x) / 2,
+
+        0.06,
+
+        (a.z + b.z) / 2
+
     );
 
 
@@ -709,20 +790,19 @@ function createRoadSegment(
     );
 
 
-    // Ligne centrale pour améliorer
-    // visuellement les grandes routes.
-
     if (
         width >= 8
     ) {
 
         const line =
             new THREE.Mesh(
+
                 new THREE.BoxGeometry(
-                    .12,
-                    .02,
+                    0.12,
+                    0.02,
                     length
                 ),
+
                 new THREE.MeshBasicMaterial({
                     color:0xffffff
                 })
@@ -735,7 +815,7 @@ function createRoadSegment(
 
 
         line.position.y =
-            .13;
+            0.13;
 
 
         line.rotation.y =
@@ -760,51 +840,62 @@ function createBuilding(
     if (
         way.geometry.length < 3
     ) {
+
         return;
     }
 
 
     const points =
         way.geometry.map(
-            p =>
+            point =>
                 gpsToWorld(
-                    p.lat,
-                    p.lon
+                    point.lat,
+                    point.lon
                 )
         );
 
 
-    let minX=Infinity;
-    let maxX=-Infinity;
-    let minZ=Infinity;
-    let maxZ=-Infinity;
+    let minX =
+        Infinity;
+
+    let maxX =
+        -Infinity;
+
+    let minZ =
+        Infinity;
+
+    let maxZ =
+        -Infinity;
 
 
     points.forEach(
-        p => {
+        point => {
 
             minX =
                 Math.min(
                     minX,
-                    p.x
+                    point.x
                 );
+
 
             maxX =
                 Math.max(
                     maxX,
-                    p.x
+                    point.x
                 );
+
 
             minZ =
                 Math.min(
                     minZ,
-                    p.z
+                    point.z
                 );
+
 
             maxZ =
                 Math.max(
                     maxZ,
-                    p.z
+                    point.z
                 );
         }
     );
@@ -812,14 +903,14 @@ function createBuilding(
 
     const width =
         Math.min(
-            maxX-minX,
+            maxX - minX,
             80
         );
 
 
     const depth =
         Math.min(
-            maxZ-minZ,
+            maxZ - minZ,
             80
         );
 
@@ -828,11 +919,13 @@ function createBuilding(
         width < 2 ||
         depth < 2
     ) {
+
         return;
     }
 
 
-    let height = 6;
+    let height =
+        6;
 
 
     if (
@@ -848,6 +941,7 @@ function createBuilding(
         if (
             Number.isFinite(h)
         ) {
+
             height =
                 Math.min(
                     Math.max(
@@ -877,7 +971,7 @@ function createBuilding(
             height =
                 Math.min(
                     Math.max(
-                        levels*3,
+                        levels * 3,
                         3
                     ),
                     80
@@ -888,30 +982,38 @@ function createBuilding(
 
     const building =
         new THREE.Mesh(
+
             new THREE.BoxGeometry(
                 width,
                 height,
                 depth
             ),
+
             new THREE.MeshStandardMaterial({
                 color:
                     buildingColor(
                         way.tags.building
                     ),
-                roughness:.82
+
+                roughness:0.82
             })
         );
 
 
     building.position.set(
-        (minX+maxX)/2,
-        height/2,
-        (minZ+maxZ)/2
+
+        (minX + maxX) / 2,
+
+        height / 2,
+
+        (minZ + maxZ) / 2
+
     );
 
 
     building.castShadow =
         true;
+
 
     building.receiveShadow =
         true;
@@ -929,30 +1031,44 @@ function buildingColor(
 
     if (
         type === "industrial"
-    )
+    ) {
+
         return 0x9da3a8;
+    }
+
 
     if (
         type === "commercial"
-    )
+    ) {
+
         return 0xc6c6c6;
+    }
+
 
     if (
         type === "school"
-    )
+    ) {
+
         return 0xe2c18f;
+    }
+
 
     if (
         type === "church"
-    )
+    ) {
+
         return 0xd8d0c0;
+    }
+
 
     const colors = [
+
         0xd7d1c5,
         0xc9c9c9,
         0xe1c7aa,
         0xbfc8cc,
         0xd6b9a0
+
     ];
 
 
@@ -977,14 +1093,16 @@ function createPlayer() {
 
     const body =
         new THREE.Mesh(
+
             new THREE.BoxGeometry(
                 2.8,
                 1,
                 4.8
             ),
+
             new THREE.MeshStandardMaterial({
                 color:0x1264ff,
-                roughness:.5
+                roughness:0.5
             })
         );
 
@@ -1004,11 +1122,13 @@ function createPlayer() {
 
     const roof =
         new THREE.Mesh(
+
             new THREE.BoxGeometry(
                 2.1,
-                .7,
+                0.7,
                 2.3
             ),
+
             new THREE.MeshStandardMaterial({
                 color:0x20252a
             })
@@ -1018,7 +1138,7 @@ function createPlayer() {
     roof.position.set(
         0,
         1.75,
-        -.2
+        -0.2
     );
 
 
@@ -1029,9 +1149,9 @@ function createPlayer() {
 
     const wheelGeometry =
         new THREE.CylinderGeometry(
-            .5,
-            .5,
-            .38,
+            0.5,
+            0.5,
+            0.38,
             16
         );
 
@@ -1043,15 +1163,17 @@ function createPlayer() {
 
 
     const wheels = [
-        [-1.45,.5,-1.55],
-        [1.45,.5,-1.55],
-        [-1.45,.5,1.55],
-        [1.45,.5,1.55]
+
+        [-1.45,0.5,-1.55],
+        [1.45,0.5,-1.55],
+        [-1.45,0.5,1.55],
+        [1.45,0.5,1.55]
+
     ];
 
 
     wheels.forEach(
-        p => {
+        position => {
 
             const wheel =
                 new THREE.Mesh(
@@ -1061,13 +1183,13 @@ function createPlayer() {
 
 
             wheel.rotation.z =
-                Math.PI/2;
+                Math.PI / 2;
 
 
             wheel.position.set(
-                p[0],
-                p[1],
-                p[2]
+                position[0],
+                position[1],
+                position[2]
             );
 
 
@@ -1101,8 +1223,12 @@ function updateCamera() {
         return;
 
 
-    const distance = 13;
-    const height = 7;
+    const distance =
+        13;
+
+
+    const height =
+        7;
 
 
     camera.position.x =
@@ -1126,20 +1252,28 @@ function updateCamera() {
 
 
     camera.lookAt(
+
         player.position.x,
+
         1,
+
         player.position.z
+
     );
 }
 
 
 document
-    .getElementById("cameraLeft")
+    .getElementById(
+        "cameraLeft"
+    )
     .addEventListener(
         "click",
         () => {
 
-            cameraAngle -= .35;
+            cameraAngle -=
+                0.35;
+
 
             updateCamera();
         }
@@ -1147,12 +1281,16 @@ document
 
 
 document
-    .getElementById("cameraRight")
+    .getElementById(
+        "cameraRight"
+    )
     .addEventListener(
         "click",
         () => {
 
-            cameraAngle += .35;
+            cameraAngle +=
+                0.35;
+
 
             updateCamera();
         }
@@ -1165,37 +1303,45 @@ document
 
 joystick.addEventListener(
     "touchstart",
-    e => {
+    event => {
 
-        e.preventDefault();
+        event.preventDefault();
 
         joystickActive =
             true;
 
+
         updateJoystick(
-            e.touches[0]
+            event.touches[0]
         );
     },
-    {passive:false}
+
+    {
+        passive:false
+    }
 );
 
 
 joystick.addEventListener(
     "touchmove",
-    e => {
+    event => {
 
-        e.preventDefault();
+        event.preventDefault();
+
 
         if (
             joystickActive
         ) {
 
             updateJoystick(
-                e.touches[0]
+                event.touches[0]
             );
         }
     },
-    {passive:false}
+
+    {
+        passive:false
+    }
 );
 
 
@@ -1221,12 +1367,12 @@ function updateJoystick(
 
     const centerX =
         rect.left +
-        rect.width/2;
+        rect.width / 2;
 
 
     const centerY =
         rect.top +
-        rect.height/2;
+        rect.height / 2;
 
 
     let dx =
@@ -1240,14 +1386,14 @@ function updateJoystick(
 
 
     const max =
-        rect.width/2 -
+        rect.width / 2 -
         32;
 
 
     const length =
         Math.sqrt(
-            dx*dx +
-            dy*dy
+            dx * dx +
+            dy * dy
         );
 
 
@@ -1256,25 +1402,26 @@ function updateJoystick(
     ) {
 
         dx =
-            dx/length *
+            dx / length *
             max;
 
+
         dy =
-            dy/length *
+            dy / length *
             max;
     }
 
 
     stick.style.transform =
-        `translate(${dx}px,${dy}px)`;
+        `translate(${dx}px, ${dy}px)`;
 
 
     moveX =
-        dx/max;
+        dx / max;
 
 
     moveY =
-        dy/max;
+        dy / max;
 }
 
 
@@ -1283,8 +1430,11 @@ function resetJoystick() {
     joystickActive =
         false;
 
+
     moveX = 0;
+
     moveY = 0;
+
 
     stick.style.transform =
         "translate(0,0)";
@@ -1292,94 +1442,101 @@ function resetJoystick() {
 
 
 // ============================================================
-// ROTATION AVEC LE DOIGT
+// CAMERA AU DOIGT
 // ============================================================
 
-rendererTouchSetup();
+document.addEventListener(
+    "touchstart",
+    event => {
 
+        if (
+            event.target.closest(
+                "#joystick"
+            ) ||
+            event.target.closest(
+                "#miniMap"
+            ) ||
+            event.target.closest(
+                "#fullscreenMap"
+            )
+        ) {
 
-function rendererTouchSetup() {
-
-    document.addEventListener(
-        "touchstart",
-        e => {
-
-            if (
-                e.target.closest(
-                    "#joystick"
-                ) ||
-                e.target.closest(
-                    "#miniMap"
-                )
-            ) {
-                return;
-            }
-
-
-            if (
-                e.touches.length === 1
-            ) {
-
-                lastTouchX =
-                    e.touches[0].clientX;
-            }
-        },
-        {passive:true}
-    );
-
-
-    document.addEventListener(
-        "touchmove",
-        e => {
-
-            if (
-                e.target.closest(
-                    "#joystick"
-                )
-            ) {
-                return;
-            }
-
-
-            if (
-                e.touches.length !== 1 ||
-                lastTouchX === null
-            ) {
-                return;
-            }
-
-
-            const x =
-                e.touches[0].clientX;
-
-
-            const delta =
-                x-lastTouchX;
-
-
-            cameraAngle -=
-                delta*.008;
-
-
-            lastTouchX =
-                x;
-
-
-            updateCamera();
-        },
-        {passive:true}
-    );
-
-
-    document.addEventListener(
-        "touchend",
-        () => {
-
-            lastTouchX =
-                null;
+            return;
         }
-    );
-}
+
+
+        if (
+            event.touches.length === 1
+        ) {
+
+            lastTouchX =
+                event.touches[0].clientX;
+        }
+    },
+    {
+        passive:true
+    }
+);
+
+
+document.addEventListener(
+    "touchmove",
+    event => {
+
+        if (
+            event.target.closest(
+                "#joystick"
+            ) ||
+            event.target.closest(
+                "#fullscreenMap"
+            )
+        ) {
+
+            return;
+        }
+
+
+        if (
+            event.touches.length !== 1 ||
+            lastTouchX === null
+        ) {
+
+            return;
+        }
+
+
+        const x =
+            event.touches[0].clientX;
+
+
+        const delta =
+            x - lastTouchX;
+
+
+        cameraAngle -=
+            delta * 0.008;
+
+
+        lastTouchX =
+            x;
+
+
+        updateCamera();
+    },
+    {
+        passive:true
+    }
+);
+
+
+document.addEventListener(
+    "touchend",
+    () => {
+
+        lastTouchX =
+            null;
+    }
+);
 
 
 // ============================================================
@@ -1388,16 +1545,15 @@ function rendererTouchSetup() {
 
 function updatePlayer() {
 
-    if (
-        !player
-    )
+    if (!player)
         return;
 
 
     if (
-        Math.abs(moveX) < .05 &&
-        Math.abs(moveY) < .05
+        Math.abs(moveX) < 0.05 &&
+        Math.abs(moveY) < 0.05
     ) {
+
         return;
     }
 
@@ -1405,14 +1561,15 @@ function updatePlayer() {
     let dx =
         moveX;
 
+
     let dz =
         moveY;
 
 
     const length =
         Math.sqrt(
-            dx*dx +
-            dz*dz
+            dx * dx +
+            dz * dz
         );
 
 
@@ -1420,13 +1577,13 @@ function updatePlayer() {
         length > 1
     ) {
 
-        dx /= length;
-        dz /= length;
+        dx /=
+            length;
+
+        dz /=
+            length;
     }
 
-
-    // Le joystick est relatif
-    // à la caméra.
 
     const forwardX =
         -Math.sin(
@@ -1453,21 +1610,21 @@ function updatePlayer() {
 
 
     const worldX =
-        rightX*dx +
-        forwardX*(-dz);
+        rightX * dx +
+        forwardX * (-dz);
 
 
     const worldZ =
-        rightZ*dx +
-        forwardZ*(-dz);
+        rightZ * dx +
+        forwardZ * (-dz);
 
 
     player.position.x +=
-        worldX*speed;
+        worldX * speed;
 
 
     player.position.z +=
-        worldZ*speed;
+        worldZ * speed;
 
 
     player.rotation.y =
@@ -1503,27 +1660,29 @@ function resizeMaps() {
 
 
     miniCanvas.width =
-        miniCanvas.clientWidth*dpr;
+        miniCanvas.clientWidth *
+        dpr;
 
 
     miniCanvas.height =
-        miniCanvas.clientHeight*dpr;
+        miniCanvas.clientHeight *
+        dpr;
 
 
     fullCanvas.width =
-        innerWidth*dpr;
+        fullCanvas.clientWidth *
+        dpr;
 
 
     fullCanvas.height =
-        innerHeight*dpr;
+        fullCanvas.clientHeight *
+        dpr;
 }
 
 
 function drawMiniMap() {
 
-    if (
-        !gameStarted
-    )
+    if (!gameStarted)
         return;
 
 
@@ -1541,12 +1700,18 @@ function drawFullMap() {
 }
 
 
+// ============================================================
+// DESSIN DE LA CARTE
+// ============================================================
+
 function drawMap(
     canvas
 ) {
 
     const ctx =
-        canvas.getContext("2d");
+        canvas.getContext(
+            "2d"
+        );
 
 
     const width =
@@ -1577,18 +1742,37 @@ function drawMap(
     );
 
 
-    const scale =
+    let centerX =
+        width / 2;
+
+
+    let centerY =
+        height / 2;
+
+
+    let scale;
+
+
+    if (
         canvas === miniCanvas
-            ? 0.20
-            : 0.055;
+    ) {
+
+        scale =
+            0.20;
+
+    } else {
+
+        scale =
+            mapZoom;
 
 
-    const centerX =
-        width/2;
+        centerX +=
+            mapOffsetX;
 
 
-    const centerY =
-        height/2;
+        centerY +=
+            mapOffsetY;
+    }
 
 
     for (
@@ -1597,8 +1781,10 @@ function drawMap(
 
         if (
             !element.geometry
-        )
+        ) {
+
             continue;
+        }
 
 
         const isRoad =
@@ -1614,24 +1800,28 @@ function drawMap(
         if (
             !isRoad &&
             !isBuilding
-        )
+        ) {
+
             continue;
+        }
 
 
         const points =
             element.geometry.map(
-                p =>
+                point =>
                     gpsToWorld(
-                        p.lat,
-                        p.lon
+                        point.lat,
+                        point.lon
                     )
             );
 
 
         if (
             points.length < 2
-        )
+        ) {
+
             continue;
+        }
 
 
         if (isRoad) {
@@ -1643,7 +1833,10 @@ function drawMap(
             ctx.lineWidth =
                 canvas === miniCanvas
                     ? 2
-                    : 4;
+                    : Math.max(
+                        2,
+                        5 / mapZoom
+                    );
 
 
         } else {
@@ -1665,28 +1858,36 @@ function drawMap(
 
 
         points.forEach(
-            (p,i) => {
+            (point, index) => {
 
                 const x =
                     centerX +
-                    p.x*scale;
+                    point.x *
+                    scale;
 
 
                 const y =
                     centerY +
-                    p.z*scale;
+                    point.z *
+                    scale;
 
 
-                if (i===0)
+                if (
+                    index === 0
+                ) {
+
                     ctx.moveTo(
                         x,
                         y
                     );
-                else
+
+                } else {
+
                     ctx.lineTo(
                         x,
                         y
                     );
+                }
             }
         );
 
@@ -1697,6 +1898,8 @@ function drawMap(
 
             ctx.fill();
 
+            ctx.stroke();
+
         } else {
 
             ctx.stroke();
@@ -1704,32 +1907,39 @@ function drawMap(
     }
 
 
-    // Joueur
+    // ========================================================
+    // POSITION DU JOUEUR
+    // ========================================================
 
     if (player) {
 
         const x =
             centerX +
-            player.position.x*
+            player.position.x *
             scale;
 
 
         const y =
             centerY +
-            player.position.z*
+            player.position.z *
             scale;
+
+
+        const radius =
+            canvas === miniCanvas
+                ? 6
+                : 10;
 
 
         ctx.beginPath();
 
+
         ctx.arc(
             x,
             y,
-            canvas === miniCanvas
-                ? 6
-                : 10,
+            radius,
             0,
-            Math.PI*2
+            Math.PI * 2
         );
 
 
@@ -1740,9 +1950,10 @@ function drawMap(
         ctx.fill();
 
 
-        // Direction
+        // Direction du véhicule
 
         ctx.beginPath();
+
 
         ctx.moveTo(
             x,
@@ -1751,16 +1962,19 @@ function drawMap(
 
 
         ctx.lineTo(
+
             x +
             Math.sin(
                 player.rotation.y
-            )*
+            ) *
             18,
+
             y +
             Math.cos(
                 player.rotation.y
-            )*
+            ) *
             18
+
         );
 
 
@@ -1778,14 +1992,12 @@ function drawMap(
 
 
 // ============================================================
-// CARTE PLEIN ÉCRAN
+// OUVRIR LA CARTE
 // ============================================================
 
 function openFullMap() {
 
-    if (
-        !gameStarted
-    )
+    if (!gameStarted)
         return;
 
 
@@ -1795,12 +2007,15 @@ function openFullMap() {
 
     resizeMaps();
 
+
     drawFullMap();
 }
 
 
 document
-    .getElementById("closeMap")
+    .getElementById(
+        "closeMap"
+    )
     .addEventListener(
         "click",
         () => {
@@ -1812,11 +2027,244 @@ document
 
 
 // ============================================================
-// MULTI
+// ZOOM CARTE - 2 DOIGTS
+// ============================================================
+
+function getTouchDistance(
+    touch1,
+    touch2
+) {
+
+    const dx =
+        touch2.clientX -
+        touch1.clientX;
+
+
+    const dy =
+        touch2.clientY -
+        touch1.clientY;
+
+
+    return Math.sqrt(
+        dx * dx +
+        dy * dy
+    );
+}
+
+
+fullCanvas.addEventListener(
+    "touchstart",
+    event => {
+
+        event.preventDefault();
+
+
+        // --------------------------------
+        // 1 DOIGT
+        // --------------------------------
+
+        if (
+            event.touches.length === 1
+        ) {
+
+            mapDragging =
+                true;
+
+
+            mapLastX =
+                event.touches[0].clientX;
+
+
+            mapLastY =
+                event.touches[0].clientY;
+        }
+
+
+        // --------------------------------
+        // 2 DOIGTS
+        // --------------------------------
+
+        if (
+            event.touches.length === 2
+        ) {
+
+            mapDragging =
+                false;
+
+
+            mapPinching =
+                true;
+
+
+            mapStartDistance =
+                getTouchDistance(
+                    event.touches[0],
+                    event.touches[1]
+                );
+
+
+            mapStartZoom =
+                mapZoom;
+        }
+
+    },
+    {
+        passive:false
+    }
+);
+
+
+// ============================================================
+// MOUVEMENT SUR LA CARTE
+// ============================================================
+
+fullCanvas.addEventListener(
+    "touchmove",
+    event => {
+
+        event.preventDefault();
+
+
+        // --------------------------------
+        // DÉPLACEMENT
+        // --------------------------------
+
+        if (
+            event.touches.length === 1 &&
+            mapDragging
+        ) {
+
+            const x =
+                event.touches[0].clientX;
+
+
+            const y =
+                event.touches[0].clientY;
+
+
+            mapOffsetX +=
+                x - mapLastX;
+
+
+            mapOffsetY +=
+                y - mapLastY;
+
+
+            mapLastX =
+                x;
+
+
+            mapLastY =
+                y;
+
+
+            drawFullMap();
+        }
+
+
+        // --------------------------------
+        // PINCH ZOOM
+        // --------------------------------
+
+        if (
+            event.touches.length === 2 &&
+            mapPinching
+        ) {
+
+            const distance =
+                getTouchDistance(
+                    event.touches[0],
+                    event.touches[1]
+                );
+
+
+            const difference =
+                distance -
+                mapStartDistance;
+
+
+            mapZoom =
+                mapStartZoom +
+                difference *
+                0.00015;
+
+
+            mapZoom =
+                Math.max(
+                    0.005,
+                    Math.min(
+                        mapZoom,
+                        0.5
+                    )
+                );
+
+
+            drawFullMap();
+        }
+
+    },
+    {
+        passive:false
+    }
+);
+
+
+// ============================================================
+// FIN DU TOUCHER
+// ============================================================
+
+fullCanvas.addEventListener(
+    "touchend",
+    event => {
+
+        if (
+            event.touches.length === 0
+        ) {
+
+            mapDragging =
+                false;
+
+
+            mapPinching =
+                false;
+        }
+
+
+        if (
+            event.touches.length === 1
+        ) {
+
+            mapPinching =
+                false;
+
+
+            mapDragging =
+                true;
+
+
+            mapLastX =
+                event.touches[0].clientX;
+
+
+            mapLastY =
+                event.touches[0].clientY;
+        }
+
+    },
+    {
+        passive:false
+    }
+);
+
+
+// ============================================================
+// MULTIJOUEUR
 // ============================================================
 
 document
-    .getElementById("multiMenu")
+    .getElementById(
+        "multiMenu"
+    )
     .addEventListener(
         "click",
         () => {
@@ -1828,7 +2276,9 @@ document
 
 
 document
-    .getElementById("closeMulti")
+    .getElementById(
+        "closeMulti"
+    )
     .addEventListener(
         "click",
         () => {
@@ -1840,7 +2290,9 @@ document
 
 
 document
-    .getElementById("createRoom")
+    .getElementById(
+        "createRoom"
+    )
     .addEventListener(
         "click",
         () => {
@@ -1883,7 +2335,9 @@ document
 
 
 document
-    .getElementById("joinRoom")
+    .getElementById(
+        "joinRoom"
+    )
     .addEventListener(
         "click",
         () => {
@@ -1924,14 +2378,6 @@ function connectMultiplayer(
     room
 ) {
 
-    /*
-     * Cette partie prépare la connexion.
-     *
-     * Elle fonctionne seulement si
-     * ton server.js possède un serveur
-     * WebSocket compatible.
-     */
-
     try {
 
         const protocol =
@@ -1953,9 +2399,13 @@ function connectMultiplayer(
 
                 multiplayerSocket.send(
                     JSON.stringify({
+
                         type:"join",
+
                         name:name,
+
                         room:room
+
                     })
                 );
 
@@ -1974,22 +2424,16 @@ function connectMultiplayer(
                 document.getElementById(
                     "multiStatus"
                 ).textContent =
-                    "⚠️ Le serveur multijoueur n'est pas encore configuré.";
+                    "⚠️ Le serveur multijoueur n'est pas configuré.";
             };
 
 
-        multiplayerSocket.onclose =
-            () => {
+    } catch (error) {
 
-                console.log(
-                    "Connexion multijoueur fermée."
-                );
-            };
+        console.error(
+            error
+        );
 
-
-    } catch(error) {
-
-        console.error(error);
 
         document.getElementById(
             "multiStatus"
@@ -2025,7 +2469,7 @@ function animate() {
 
 
 // ============================================================
-// RESIZE
+// REDIMENSIONNEMENT
 // ============================================================
 
 window.addEventListener(
@@ -2052,6 +2496,9 @@ window.addEventListener(
         resizeMaps();
 
 
+        drawMiniMap();
+
+
         if (
             fullMap.style.display ===
             "block"
@@ -2059,8 +2506,5 @@ window.addEventListener(
 
             drawFullMap();
         }
-
-
-        drawMiniMap();
     }
 );
