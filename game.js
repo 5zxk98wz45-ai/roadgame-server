@@ -1,6 +1,8 @@
 // ============================================================
 // ROADGAME - GAME.JS
-// Carte réelle + monde 3D + joystick + caméra + carte zoomable
+// Carte satellite + monde 3D + bâtiments réalistes
+// Collisions + photos + joystick + caméra + mini-map
+// Multijoueur + zoom tactile
 // ============================================================
 
 const NOMINATIM =
@@ -9,10 +11,26 @@ const NOMINATIM =
 const OVERPASS =
     "https://overpass-api.de/api/interpreter";
 
+const WIKIMEDIA_API =
+    "https://commons.wikimedia.org/w/api.php";
+
+const SATELLITE_URL =
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile";
+
+
+// ============================================================
+// THREE.JS
+// ============================================================
+
 let scene;
 let camera;
 let renderer;
 let player;
+
+
+// ============================================================
+// POSITION
+// ============================================================
 
 let centerLat = 0;
 let centerLon = 0;
@@ -36,6 +54,15 @@ let multiplayerSocket = null;
 
 
 // ============================================================
+// COLLISIONS
+// ============================================================
+
+let collisionBuildings = [];
+
+const PLAYER_RADIUS = 1.45;
+
+
+// ============================================================
 // CARTE
 // ============================================================
 
@@ -54,6 +81,17 @@ let mapLastY = 0;
 let mapStartDistance = 0;
 
 let mapStartZoom = 0;
+
+
+// ============================================================
+// PHOTO DE BÂTIMENT
+// ============================================================
+
+let nearbyBuilding = null;
+
+let photoSearchTimer = null;
+
+let photoRequestRunning = false;
 
 
 // ============================================================
@@ -176,7 +214,7 @@ async function startGame() {
 
 
         loadingText.textContent =
-            "🛣️ Recherche des routes et bâtiments...";
+            "🛰️ Préparation de la carte satellite...";
 
 
         const data =
@@ -217,16 +255,28 @@ async function startGame() {
             "block";
 
 
-        document.getElementById(
-            "cameraButtons"
-        ).style.display =
-            "block";
+        const cameraButtons =
+            document.getElementById(
+                "cameraButtons"
+            );
+
+        if (cameraButtons) {
+
+            cameraButtons.style.display =
+                "block";
+        }
 
 
-        document.getElementById(
-            "vehiclePanel"
-        ).style.display =
-            "block";
+        const vehiclePanel =
+            document.getElementById(
+                "vehiclePanel"
+            );
+
+        if (vehiclePanel) {
+
+            vehiclePanel.style.display =
+                "block";
+        }
 
 
         locationName.textContent =
@@ -285,7 +335,7 @@ async function startGame() {
 
 
 // ============================================================
-// RECHERCHE DE L'ADRESSE
+// GEOCODAGE
 // ============================================================
 
 async function geocode(query) {
@@ -299,7 +349,15 @@ async function geocode(query) {
 
 
     const response =
-        await fetch(url);
+        await fetch(
+            url,
+            {
+                headers: {
+                    "Accept":
+                        "application/json"
+                }
+            }
+        );
 
 
     if (!response.ok) {
@@ -328,7 +386,7 @@ async function geocode(query) {
 
 
 // ============================================================
-// RÉCUPÉRER LES DONNÉES OPENSTREETMAP
+// OPENSTREETMAP
 // ============================================================
 
 async function getOSMData(
@@ -354,7 +412,7 @@ async function getOSMData(
 
 
     const query = `
-[out:json][timeout:40];
+[out:json][timeout:50];
 (
   way["highway"](${south},${west},${north},${east});
   way["building"](${south},${west},${north},${east});
@@ -367,14 +425,14 @@ out body geom;
         await fetch(
             OVERPASS,
             {
-                method:"POST",
+                method: "POST",
 
-                headers:{
+                headers: {
                     "Content-Type":
                         "text/plain"
                 },
 
-                body:query
+                body: query
             }
         );
 
@@ -418,15 +476,15 @@ function initThree() {
 
     scene.background =
         new THREE.Color(
-            0x75bff0
+            0x87c9f5
         );
 
 
     scene.fog =
         new THREE.Fog(
-            0x75bff0,
-            250,
-            1400
+            0x87c9f5,
+            300,
+            1800
         );
 
 
@@ -442,7 +500,7 @@ function initThree() {
 
     renderer =
         new THREE.WebGLRenderer({
-            antialias:true
+            antialias: true
         });
 
 
@@ -462,6 +520,10 @@ function initThree() {
 
     renderer.shadowMap.enabled =
         true;
+
+
+    renderer.shadowMap.type =
+        THREE.PCFSoftShadowMap;
 
 
     game.innerHTML = "";
@@ -503,6 +565,13 @@ function initThree() {
         true;
 
 
+    sun.shadow.mapSize.width =
+        2048;
+
+    sun.shadow.mapSize.height =
+        2048;
+
+
     scene.add(
         sun
     );
@@ -510,7 +579,7 @@ function initThree() {
 
 
 // ============================================================
-// GPS -> COORDONNÉES 3D
+// GPS -> MONDE 3D
 // ============================================================
 
 function gpsToWorld(
@@ -540,29 +609,35 @@ function gpsToWorld(
         z:
             -(lat - centerLat) *
             metersLat
+
     };
 }
 
 
 // ============================================================
-// CONSTRUIRE LE MONDE
+// MONDE
 // ============================================================
 
 function buildWorld(
     elements
 ) {
 
+    collisionBuildings = [];
+
+
     const ground =
         new THREE.Mesh(
+
             new THREE.PlaneGeometry(
                 2500,
                 2500
             ),
 
             new THREE.MeshStandardMaterial({
-                color:0x5b9b52,
-                roughness:1
+                color: 0x5b9b52,
+                roughness: 1
             })
+
         );
 
 
@@ -579,6 +654,33 @@ function buildWorld(
     );
 
 
+    // Routes d'abord
+    for (
+        const element of elements
+    ) {
+
+        if (
+            element.type !== "way" ||
+            !element.geometry
+        ) {
+
+            continue;
+        }
+
+
+        if (
+            element.tags &&
+            element.tags.highway
+        ) {
+
+            createRoad(
+                element
+            );
+        }
+    }
+
+
+    // Bâtiments ensuite
     for (
         const element of elements
     ) {
@@ -598,19 +700,6 @@ function buildWorld(
         ) {
 
             createBuilding(
-                element
-            );
-
-            continue;
-        }
-
-
-        if (
-            element.tags &&
-            element.tags.highway
-        ) {
-
-            createRoad(
                 element
             );
         }
@@ -662,34 +751,31 @@ function createRoad(
         case "motorway":
         case "trunk":
 
-            width =
-                12;
+            width = 12;
 
             break;
 
 
         case "primary":
 
-            width =
-                9;
+            width = 9;
 
             break;
 
 
         case "secondary":
 
-            width =
-                8;
+            width = 8;
 
             break;
 
 
         case "tertiary":
 
-            width =
-                7;
+            width = 7;
 
             break;
+
     }
 
 
@@ -757,9 +843,10 @@ function createRoadSegment(
             ),
 
             new THREE.MeshStandardMaterial({
-                color:0x3b3b3b,
-                roughness:0.9
+                color: 0x3b3b3b,
+                roughness: 0.9
             })
+
         );
 
 
@@ -804,8 +891,9 @@ function createRoadSegment(
                 ),
 
                 new THREE.MeshBasicMaterial({
-                    color:0xffffff
+                    color: 0xffffff
                 })
+
             );
 
 
@@ -830,7 +918,7 @@ function createRoadSegment(
 
 
 // ============================================================
-// BÂTIMENTS
+// BÂTIMENT RÉALISTE
 // ============================================================
 
 function createBuilding(
@@ -855,73 +943,32 @@ function createBuilding(
         );
 
 
-    let minX =
-        Infinity;
-
-    let maxX =
-        -Infinity;
-
-    let minZ =
-        Infinity;
-
-    let maxZ =
-        -Infinity;
+    const shape =
+        new THREE.Shape();
 
 
     points.forEach(
-        point => {
+        (point, index) => {
 
-            minX =
-                Math.min(
-                    minX,
-                    point.x
+            if (index === 0) {
+
+                shape.moveTo(
+                    point.x,
+                    -point.z
                 );
 
+            } else {
 
-            maxX =
-                Math.max(
-                    maxX,
-                    point.x
+                shape.lineTo(
+                    point.x,
+                    -point.z
                 );
-
-
-            minZ =
-                Math.min(
-                    minZ,
-                    point.z
-                );
-
-
-            maxZ =
-                Math.max(
-                    maxZ,
-                    point.z
-                );
+            }
         }
     );
 
 
-    const width =
-        Math.min(
-            maxX - minX,
-            80
-        );
-
-
-    const depth =
-        Math.min(
-            maxZ - minZ,
-            80
-        );
-
-
-    if (
-        width < 2 ||
-        depth < 2
-    ) {
-
-        return;
-    }
+    shape.closePath();
 
 
     let height =
@@ -980,35 +1027,45 @@ function createBuilding(
     }
 
 
-    const building =
-        new THREE.Mesh(
+    const geometry =
+        new THREE.ExtrudeGeometry(
+            shape,
+            {
+                depth: height,
 
-            new THREE.BoxGeometry(
-                width,
-                height,
-                depth
-            ),
+                bevelEnabled: false,
 
-            new THREE.MeshStandardMaterial({
-                color:
-                    buildingColor(
-                        way.tags.building
-                    ),
-
-                roughness:0.82
-            })
+                steps: 1
+            }
         );
 
 
-    building.position.set(
-
-        (minX + maxX) / 2,
-
-        height / 2,
-
-        (minZ + maxZ) / 2
-
+    geometry.rotateX(
+        -Math.PI / 2
     );
+
+
+    const material =
+        new THREE.MeshStandardMaterial({
+
+            color:
+                buildingColor(
+                    way.tags.building
+                ),
+
+            roughness: 0.78
+        });
+
+
+    const building =
+        new THREE.Mesh(
+            geometry,
+            material
+        );
+
+
+    building.position.y =
+        0;
 
 
     building.castShadow =
@@ -1022,8 +1079,123 @@ function createBuilding(
     scene.add(
         building
     );
+
+
+    // --------------------------------------------------------
+    // COLLISION
+    // --------------------------------------------------------
+
+    const collision =
+        getBuildingBounds(
+            points,
+            height
+        );
+
+
+    collisionBuildings.push({
+
+        minX: collision.minX,
+
+        maxX: collision.maxX,
+
+        minZ: collision.minZ,
+
+        maxZ: collision.maxZ,
+
+        element: way,
+
+        mesh: building
+
+    });
+
+
+    // --------------------------------------------------------
+    // INFOS
+    // --------------------------------------------------------
+
+    building.userData.osm =
+        way;
+
+
+    building.userData.photo =
+        null;
+
+
+    building.userData.photoLoading =
+        false;
 }
 
+
+// ============================================================
+// BOUNDS BÂTIMENT
+// ============================================================
+
+function getBuildingBounds(
+    points,
+    height
+) {
+
+    let minX =
+        Infinity;
+
+    let maxX =
+        -Infinity;
+
+    let minZ =
+        Infinity;
+
+    let maxZ =
+        -Infinity;
+
+
+    points.forEach(
+        point => {
+
+            minX =
+                Math.min(
+                    minX,
+                    point.x
+                );
+
+
+            maxX =
+                Math.max(
+                    maxX,
+                    point.x
+                );
+
+
+            minZ =
+                Math.min(
+                    minZ,
+                    point.z
+                );
+
+
+            maxZ =
+                Math.max(
+                    maxZ,
+                    point.z
+                );
+        }
+    );
+
+
+    return {
+
+        minX,
+        maxX,
+        minZ,
+        maxZ,
+        height
+
+    };
+}
+
+
+// ============================================================
+// COULEUR BÂTIMENT
+// ============================================================
 
 function buildingColor(
     type
@@ -1058,6 +1230,22 @@ function buildingColor(
     ) {
 
         return 0xd8d0c0;
+    }
+
+
+    if (
+        type === "house"
+    ) {
+
+        return 0xd7c7b5;
+    }
+
+
+    if (
+        type === "apartments"
+    ) {
+
+        return 0xbfc8cc;
     }
 
 
@@ -1101,9 +1289,10 @@ function createPlayer() {
             ),
 
             new THREE.MeshStandardMaterial({
-                color:0x1264ff,
-                roughness:0.5
+                color: 0x1264ff,
+                roughness: 0.5
             })
+
         );
 
 
@@ -1130,8 +1319,9 @@ function createPlayer() {
             ),
 
             new THREE.MeshStandardMaterial({
-                color:0x20252a
+                color: 0x20252a
             })
+
         );
 
 
@@ -1158,16 +1348,16 @@ function createPlayer() {
 
     const wheelMaterial =
         new THREE.MeshStandardMaterial({
-            color:0x111111
+            color: 0x111111
         });
 
 
     const wheels = [
 
-        [-1.45,0.5,-1.55],
-        [1.45,0.5,-1.55],
-        [-1.45,0.5,1.55],
-        [1.45,0.5,1.55]
+        [-1.45, 0.5, -1.55],
+        [1.45, 0.5, -1.55],
+        [-1.45, 0.5, 1.55],
+        [1.45, 0.5, 1.55]
 
     ];
 
@@ -1210,6 +1400,42 @@ function createPlayer() {
         0,
         0
     );
+}
+
+
+// ============================================================
+// COLLISION JOUEUR / BÂTIMENT
+// ============================================================
+
+function isColliding(
+    x,
+    z
+) {
+
+    for (
+        const building of collisionBuildings
+    ) {
+
+        if (
+            x + PLAYER_RADIUS >
+            building.minX &&
+
+            x - PLAYER_RADIUS <
+            building.maxX &&
+
+            z + PLAYER_RADIUS >
+            building.minZ &&
+
+            z - PLAYER_RADIUS <
+            building.maxZ
+        ) {
+
+            return true;
+        }
+    }
+
+
+    return false;
 }
 
 
@@ -1263,38 +1489,48 @@ function updateCamera() {
 }
 
 
-document
-    .getElementById(
+const cameraLeft =
+    document.getElementById(
         "cameraLeft"
-    )
-    .addEventListener(
+    );
+
+
+if (cameraLeft) {
+
+    cameraLeft.addEventListener(
         "click",
         () => {
 
             cameraAngle -=
                 0.35;
 
-
             updateCamera();
+
         }
+    );
+}
+
+
+const cameraRight =
+    document.getElementById(
+        "cameraRight"
     );
 
 
-document
-    .getElementById(
-        "cameraRight"
-    )
-    .addEventListener(
+if (cameraRight) {
+
+    cameraRight.addEventListener(
         "click",
         () => {
 
             cameraAngle +=
                 0.35;
 
-
             updateCamera();
+
         }
     );
+}
 
 
 // ============================================================
@@ -1314,10 +1550,10 @@ joystick.addEventListener(
         updateJoystick(
             event.touches[0]
         );
-    },
 
+    },
     {
-        passive:false
+        passive: false
     }
 );
 
@@ -1337,10 +1573,10 @@ joystick.addEventListener(
                 event.touches[0]
             );
         }
-    },
 
+    },
     {
-        passive:false
+        passive: false
     }
 );
 
@@ -1442,7 +1678,7 @@ function resetJoystick() {
 
 
 // ============================================================
-// CAMERA AU DOIGT
+// CAMÉRA AU DOIGT
 // ============================================================
 
 document.addEventListener(
@@ -1472,9 +1708,10 @@ document.addEventListener(
             lastTouchX =
                 event.touches[0].clientX;
         }
+
     },
     {
-        passive:true
+        passive: true
     }
 );
 
@@ -1522,9 +1759,10 @@ document.addEventListener(
 
 
         updateCamera();
+
     },
     {
-        passive:true
+        passive: true
     }
 );
 
@@ -1535,6 +1773,7 @@ document.addEventListener(
 
         lastTouchX =
             null;
+
     }
 );
 
@@ -1553,6 +1792,8 @@ function updatePlayer() {
         Math.abs(moveX) < 0.05 &&
         Math.abs(moveY) < 0.05
     ) {
+
+        checkNearbyBuildings();
 
         return;
     }
@@ -1619,24 +1860,592 @@ function updatePlayer() {
         forwardZ * (-dz);
 
 
-    player.position.x +=
+    const nextX =
+        player.position.x +
         worldX * speed;
 
 
-    player.position.z +=
+    const nextZ =
+        player.position.z +
         worldZ * speed;
 
 
-    player.rotation.y =
-        Math.atan2(
-            worldX,
-            worldZ
-        );
+    // ========================================================
+    // COLLISION
+    // On teste séparément X et Z pour permettre de longer
+    // les murs au lieu de rester complètement bloqué.
+    // ========================================================
+
+    if (
+        !isColliding(
+            nextX,
+            player.position.z
+        )
+    ) {
+
+        player.position.x =
+            nextX;
+    }
+
+
+    if (
+        !isColliding(
+            player.position.x,
+            nextZ
+        )
+    ) {
+
+        player.position.z =
+            nextZ;
+    }
+
+
+    if (
+        Math.abs(worldX) > 0.01 ||
+        Math.abs(worldZ) > 0.01
+    ) {
+
+        player.rotation.y =
+            Math.atan2(
+                worldX,
+                worldZ
+            );
+    }
 
 
     updateCamera();
 
     drawMiniMap();
+
+    checkNearbyBuildings();
+
+    sendMultiplayerPosition();
+}
+
+
+// ============================================================
+// BÂTIMENT PROCHE
+// ============================================================
+
+function checkNearbyBuildings() {
+
+    if (!player)
+        return;
+
+
+    let closest =
+        null;
+
+
+    let closestDistance =
+        Infinity;
+
+
+    for (
+        const building of collisionBuildings
+    ) {
+
+        const centerX =
+            (
+                building.minX +
+                building.maxX
+            ) / 2;
+
+
+        const centerZ =
+            (
+                building.minZ +
+                building.maxZ
+            ) / 2;
+
+
+        const dx =
+            player.position.x -
+            centerX;
+
+
+        const dz =
+            player.position.z -
+            centerZ;
+
+
+        const distance =
+            Math.sqrt(
+                dx * dx +
+                dz * dz
+            );
+
+
+        if (
+            distance < closestDistance
+        ) {
+
+            closestDistance =
+                distance;
+
+            closest =
+                building;
+        }
+    }
+
+
+    if (
+        closest &&
+        closestDistance < 35
+    ) {
+
+        if (
+            nearbyBuilding !==
+            closest
+        ) {
+
+            nearbyBuilding =
+                closest;
+
+            showBuildingInfo(
+                closest
+            );
+
+            searchBuildingPhoto(
+                closest
+            );
+        }
+
+    } else {
+
+        nearbyBuilding =
+            null;
+
+        hideBuildingInfo();
+    }
+}
+
+
+// ============================================================
+// INFOS PHOTO
+// ============================================================
+
+function getBuildingName(
+    building
+) {
+
+    const tags =
+        building.element.tags ||
+        {};
+
+
+    return (
+        tags.name ||
+        tags["official_name"] ||
+        tags["addr:housenumber"] ||
+        "Bâtiment"
+    );
+}
+
+
+function showBuildingInfo(
+    building
+) {
+
+    let panel =
+        document.getElementById(
+            "buildingPhotoPanel"
+        );
+
+
+    if (!panel) {
+
+        panel =
+            document.createElement(
+                "div"
+            );
+
+
+        panel.id =
+            "buildingPhotoPanel";
+
+
+        panel.style.position =
+            "fixed";
+
+        panel.style.left =
+            "50%";
+
+        panel.style.bottom =
+            "25px";
+
+        panel.style.transform =
+            "translateX(-50%)";
+
+        panel.style.width =
+            "min(90vw, 340px)";
+
+        panel.style.background =
+            "rgba(0,0,0,.88)";
+
+        panel.style.color =
+            "white";
+
+        panel.style.padding =
+            "12px";
+
+        panel.style.borderRadius =
+            "16px";
+
+        panel.style.zIndex =
+            "9999";
+
+        panel.style.display =
+            "none";
+
+        panel.style.fontFamily =
+            "Arial, sans-serif";
+
+
+        document.body.appendChild(
+            panel
+        );
+    }
+
+
+    panel.style.display =
+        "block";
+
+
+    panel.innerHTML = `
+
+        <div style="
+            font-size:17px;
+            font-weight:bold;
+            margin-bottom:8px;
+        ">
+            🏢 ${escapeHTML(
+                getBuildingName(
+                    building
+                )
+            )}
+        </div>
+
+        <div id="buildingPhotoContent">
+
+            <div style="
+                opacity:.8;
+                font-size:14px;
+            ">
+                🔎 Recherche d'une photo...
+            </div>
+
+        </div>
+
+    `;
+}
+
+
+function hideBuildingInfo() {
+
+    const panel =
+        document.getElementById(
+            "buildingPhotoPanel"
+        );
+
+
+    if (panel) {
+
+        panel.style.display =
+            "none";
+    }
+}
+
+
+// ============================================================
+// RECHERCHE PHOTO WIKIMEDIA
+// ============================================================
+
+async function searchBuildingPhoto(
+    building
+) {
+
+    if (
+        photoRequestRunning
+    ) {
+
+        return;
+    }
+
+
+    const tags =
+        building.element.tags ||
+        {};
+
+
+    const name =
+        tags.name ||
+        tags["official_name"] ||
+        "";
+
+
+    if (!name) {
+
+        setPhotoMessage(
+            "📍 Ce bâtiment n'a pas encore de photo publique trouvée."
+        );
+
+        return;
+    }
+
+
+    photoRequestRunning =
+        true;
+
+
+    try {
+
+        const query =
+            encodeURIComponent(
+                name
+            );
+
+
+        const url =
+            WIKIMEDIA_API +
+            "?action=query" +
+            "&generator=search" +
+            "&gsrsearch=" +
+            query +
+            "&gsrnamespace=6" +
+            "&gsrlimit=5" +
+            "&prop=imageinfo" +
+            "&iiprop=url" +
+            "&iiurlwidth=500" +
+            "&format=json" +
+            "&origin=*";
+
+
+        const response =
+            await fetch(
+                url
+            );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                "Recherche photo impossible"
+            );
+        }
+
+
+        const data =
+            await response.json();
+
+
+        const pages =
+            data.query &&
+            data.query.pages;
+
+
+        if (!pages) {
+
+            setPhotoMessage(
+                "📷 Aucune photo publique trouvée."
+            );
+
+            return;
+        }
+
+
+        const first =
+            Object.values(
+                pages
+            )[0];
+
+
+        if (
+            !first ||
+            !first.imageinfo ||
+            !first.imageinfo[0]
+        ) {
+
+            setPhotoMessage(
+                "📷 Aucune photo publique trouvée."
+            );
+
+            return;
+        }
+
+
+        const image =
+            first.imageinfo[0];
+
+
+        const imageUrl =
+            image.thumburl ||
+            image.url;
+
+
+        building.photo =
+            imageUrl;
+
+
+        setPhotoImage(
+            imageUrl
+        );
+
+
+    } catch (error) {
+
+        console.warn(
+            "Photo:",
+            error
+        );
+
+
+        setPhotoMessage(
+            "📷 Aucune photo publique trouvée."
+        );
+
+    } finally {
+
+        photoRequestRunning =
+            false;
+    }
+}
+
+
+function setPhotoMessage(
+    text
+) {
+
+    const content =
+        document.getElementById(
+            "buildingPhotoContent"
+        );
+
+
+    if (!content)
+        return;
+
+
+    content.innerHTML = `
+
+        <div style="
+            font-size:14px;
+            opacity:.85;
+        ">
+            ${escapeHTML(text)}
+        </div>
+
+    `;
+}
+
+
+function setPhotoImage(
+    imageUrl
+) {
+
+    const content =
+        document.getElementById(
+            "buildingPhotoContent"
+        );
+
+
+    if (!content)
+        return;
+
+
+    content.innerHTML = `
+
+        <img
+            src="${escapeAttribute(
+                imageUrl
+            )}"
+            style="
+                width:100%;
+                max-height:220px;
+                object-fit:cover;
+                border-radius:12px;
+                display:block;
+            "
+            loading="lazy"
+            onerror="
+                this.style.display='none';
+                this.nextElementSibling.style.display='block';
+            "
+        >
+
+        <div style="
+            display:none;
+            padding:10px 0;
+            font-size:14px;
+        ">
+            📷 Photo indisponible.
+        </div>
+
+        <div style="
+            margin-top:7px;
+            font-size:11px;
+            opacity:.65;
+        ">
+            Photo provenant de Wikimedia Commons.
+        </div>
+
+    `;
+}
+
+
+// ============================================================
+// SÉCURITÉ HTML
+// ============================================================
+
+function escapeHTML(
+    text
+) {
+
+    return String(text)
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+        .replaceAll(
+            ">",
+            "&gt;"
+        )
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+        .replaceAll(
+            "'",
+            "&#039;"
+        );
+}
+
+
+function escapeAttribute(
+    text
+) {
+
+    return String(text)
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+        .replaceAll(
+            ">",
+            "&gt;"
+        );
 }
 
 
@@ -1701,7 +2510,303 @@ function drawFullMap() {
 
 
 // ============================================================
-// DESSIN DE LA CARTE
+// TUILE SATELLITE
+// ============================================================
+
+function latLonToTile(
+    lat,
+    lon,
+    zoom
+) {
+
+    const latRad =
+        lat *
+        Math.PI /
+        180;
+
+
+    const n =
+        Math.pow(
+            2,
+            zoom
+        );
+
+
+    const x =
+        (
+            lon + 180
+        ) /
+        360 *
+        n;
+
+
+    const y =
+        (
+            1 -
+            Math.asinh(
+                Math.tan(
+                    latRad
+                )
+            ) /
+            Math.PI
+        ) /
+        2 *
+        n;
+
+
+    return {
+        x,
+        y
+    };
+}
+
+
+function drawSatelliteBackground(
+    ctx,
+    width,
+    height,
+    scale
+) {
+
+    if (
+        canvasIsMiniMap(
+            ctx
+        )
+    ) {
+
+        return;
+    }
+
+
+    const zoom =
+        getSatelliteZoom(
+            scale
+        );
+
+
+    const center =
+        latLonToTile(
+            centerLat,
+            centerLon,
+            zoom
+        );
+
+
+    const tileSize =
+        256;
+
+
+    const centerPixelX =
+        center.x *
+        tileSize;
+
+
+    const centerPixelY =
+        center.y *
+        tileSize;
+
+
+    const startX =
+        centerPixelX -
+        width / 2 -
+        512;
+
+
+    const startY =
+        centerPixelY -
+        height / 2 -
+        512;
+
+
+    const endX =
+        centerPixelX +
+        width / 2 +
+        512;
+
+
+    const endY =
+        centerPixelY +
+        height / 2 +
+        512;
+
+
+    const firstTileX =
+        Math.floor(
+            startX /
+            tileSize
+        );
+
+
+    const firstTileY =
+        Math.floor(
+            startY /
+            tileSize
+        );
+
+
+    const lastTileX =
+        Math.floor(
+            endX /
+            tileSize
+        );
+
+
+    const lastTileY =
+        Math.floor(
+            endY /
+            tileSize
+        );
+
+
+    const maxTile =
+        Math.pow(
+            2,
+            zoom
+        );
+
+
+    for (
+        let tx = firstTileX;
+        tx <= lastTileX;
+        tx++
+    ) {
+
+        for (
+            let ty = firstTileY;
+            ty <= lastTileY;
+            ty++
+        ) {
+
+            const wrappedX =
+                (
+                    tx %
+                    maxTile +
+                    maxTile
+                ) %
+                maxTile;
+
+
+            if (
+                ty < 0 ||
+                ty >= maxTile
+            ) {
+
+                continue;
+            }
+
+
+            const image =
+                new Image();
+
+
+            image.crossOrigin =
+                "anonymous";
+
+
+            image.src =
+                SATELLITE_URL +
+                "/" +
+                zoom +
+                "/" +
+                ty +
+                "/" +
+                wrappedX;
+
+
+            const drawX =
+                tx *
+                tileSize -
+                centerPixelX +
+                width / 2;
+
+
+            const drawY =
+                ty *
+                tileSize -
+                centerPixelY +
+                height / 2;
+
+
+            image.onload =
+                () => {
+
+                    if (
+                        !gameStarted
+                    )
+                        return;
+
+
+                    ctx.drawImage(
+                        image,
+                        drawX,
+                        drawY,
+                        tileSize,
+                        tileSize
+                    );
+
+
+                    drawMapOverlays(
+                        ctx
+                    );
+                };
+        }
+    }
+}
+
+
+function getSatelliteZoom(
+    scale
+) {
+
+    if (
+        scale < 0.015
+    ) {
+
+        return 15;
+    }
+
+
+    if (
+        scale < 0.035
+    ) {
+
+        return 16;
+    }
+
+
+    if (
+        scale < 0.07
+    ) {
+
+        return 17;
+    }
+
+
+    if (
+        scale < 0.15
+    ) {
+
+        return 18;
+    }
+
+
+    return 19;
+}
+
+
+function canvasIsMiniMap(
+    ctx
+) {
+
+    return (
+        ctx.canvas ===
+        miniCanvas
+    );
+}
+
+
+// ============================================================
+// CARTE
 // ============================================================
 
 function drawMap(
@@ -1730,18 +2835,6 @@ function drawMap(
     );
 
 
-    ctx.fillStyle =
-        "#d8d3c8";
-
-
-    ctx.fillRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-
     let centerX =
         width / 2;
 
@@ -1760,6 +2853,27 @@ function drawMap(
         scale =
             0.20;
 
+
+        ctx.fillStyle =
+            "#d8d3c8";
+
+
+        ctx.fillRect(
+            0,
+            0,
+            width,
+            height
+        );
+
+
+        drawMapOverlays(
+            ctx,
+            scale,
+            centerX,
+            centerY
+        );
+
+
     } else {
 
         scale =
@@ -1772,8 +2886,69 @@ function drawMap(
 
         centerY +=
             mapOffsetY;
+
+
+        drawSatelliteBackground(
+            ctx,
+            width,
+            height,
+            scale
+        );
+
+
+        drawMapOverlays(
+            ctx,
+            scale,
+            centerX,
+            centerY
+        );
+    }
+}
+
+
+// ============================================================
+// OVERLAYS CARTE
+// ============================================================
+
+function drawMapOverlays(
+    ctx,
+    forcedScale,
+    forcedCenterX,
+    forcedCenterY
+) {
+
+    const canvas =
+        ctx.canvas;
+
+
+    let centerX =
+        forcedCenterX ??
+        canvas.width / 2;
+
+
+    let centerY =
+        forcedCenterY ??
+        canvas.height / 2;
+
+
+    let scale =
+        forcedScale;
+
+
+    if (
+        scale === undefined
+    ) {
+
+        scale =
+            canvas === miniCanvas
+                ? 0.20
+                : mapZoom;
     }
 
+
+    // --------------------------------------------------------
+    // BÂTIMENTS
+    // --------------------------------------------------------
 
     for (
         const element of worldData
@@ -1787,23 +2962,13 @@ function drawMap(
         }
 
 
-        const isRoad =
-            element.tags &&
-            element.tags.highway;
-
-
         const isBuilding =
             element.tags &&
             element.tags.building;
 
 
-        if (
-            !isRoad &&
-            !isBuilding
-        ) {
-
+        if (!isBuilding)
             continue;
-        }
 
 
         const points =
@@ -1817,40 +2982,10 @@ function drawMap(
 
 
         if (
-            points.length < 2
+            points.length < 3
         ) {
 
             continue;
-        }
-
-
-        if (isRoad) {
-
-            ctx.strokeStyle =
-                "#777";
-
-
-            ctx.lineWidth =
-                canvas === miniCanvas
-                    ? 2
-                    : Math.max(
-                        2,
-                        5 / mapZoom
-                    );
-
-
-        } else {
-
-            ctx.strokeStyle =
-                "#aaa";
-
-
-            ctx.fillStyle =
-                "#c8c1b5";
-
-
-            ctx.lineWidth =
-                1;
         }
 
 
@@ -1892,24 +3027,183 @@ function drawMap(
         );
 
 
-        if (isBuilding) {
+        ctx.closePath();
 
-            ctx.closePath();
 
-            ctx.fill();
+        if (
+            canvas === miniCanvas
+        ) {
 
-            ctx.stroke();
+            ctx.fillStyle =
+                "rgba(190,190,190,.65)";
+
+            ctx.strokeStyle =
+                "rgba(80,80,80,.8)";
 
         } else {
 
-            ctx.stroke();
+            ctx.fillStyle =
+                "rgba(255,255,255,.18)";
+
+            ctx.strokeStyle =
+                "rgba(255,255,255,.55)";
         }
+
+
+        ctx.lineWidth =
+            canvas === miniCanvas
+                ? 1
+                : 1.5;
+
+
+        ctx.fill();
+
+        ctx.stroke();
     }
 
 
-    // ========================================================
-    // POSITION DU JOUEUR
-    // ========================================================
+    // --------------------------------------------------------
+    // ROUTES PAR-DESSUS
+    // --------------------------------------------------------
+
+    for (
+        const element of worldData
+    ) {
+
+        if (
+            !element.geometry
+        ) {
+
+            continue;
+        }
+
+
+        const isRoad =
+            element.tags &&
+            element.tags.highway;
+
+
+        if (!isRoad)
+            continue;
+
+
+        const points =
+            element.geometry.map(
+                point =>
+                    gpsToWorld(
+                        point.lat,
+                        point.lon
+                    )
+            );
+
+
+        if (
+            points.length < 2
+        ) {
+
+            continue;
+        }
+
+
+        let roadWidth =
+            2;
+
+
+        if (
+            element.tags.highway ===
+            "primary"
+        ) {
+
+            roadWidth =
+                5;
+
+        } else if (
+            element.tags.highway ===
+            "secondary"
+        ) {
+
+            roadWidth =
+                4;
+
+        } else if (
+            element.tags.highway ===
+            "tertiary"
+        ) {
+
+            roadWidth =
+                3;
+
+        }
+
+
+        ctx.beginPath();
+
+
+        points.forEach(
+            (point, index) => {
+
+                const x =
+                    centerX +
+                    point.x *
+                    scale;
+
+
+                const y =
+                    centerY +
+                    point.z *
+                    scale;
+
+
+                if (
+                    index === 0
+                ) {
+
+                    ctx.moveTo(
+                        x,
+                        y
+                    );
+
+                } else {
+
+                    ctx.lineTo(
+                        x,
+                        y
+                    );
+                }
+            }
+        );
+
+
+        ctx.strokeStyle =
+            canvas === miniCanvas
+                ? "#555"
+                : "rgba(255,255,255,.92)";
+
+
+        ctx.lineWidth =
+            Math.max(
+                roadWidth,
+                canvas === miniCanvas
+                    ? 2
+                    : 3
+            );
+
+
+        ctx.lineCap =
+            "round";
+
+
+        ctx.lineJoin =
+            "round";
+
+
+        ctx.stroke();
+    }
+
+
+    // --------------------------------------------------------
+    // JOUEUR
+    // --------------------------------------------------------
 
     if (player) {
 
@@ -1949,8 +3243,6 @@ function drawMap(
 
         ctx.fill();
 
-
-        // Direction du véhicule
 
         ctx.beginPath();
 
@@ -1992,7 +3284,7 @@ function drawMap(
 
 
 // ============================================================
-// OUVRIR LA CARTE
+// OUVRIR CARTE
 // ============================================================
 
 function openFullMap() {
@@ -2012,22 +3304,28 @@ function openFullMap() {
 }
 
 
-document
-    .getElementById(
+const closeMap =
+    document.getElementById(
         "closeMap"
-    )
-    .addEventListener(
+    );
+
+
+if (closeMap) {
+
+    closeMap.addEventListener(
         "click",
         () => {
 
             fullMap.style.display =
                 "none";
+
         }
     );
+}
 
 
 // ============================================================
-// ZOOM CARTE - 2 DOIGTS
+// PINCH ZOOM
 // ============================================================
 
 function getTouchDistance(
@@ -2059,10 +3357,6 @@ fullCanvas.addEventListener(
         event.preventDefault();
 
 
-        // --------------------------------
-        // 1 DOIGT
-        // --------------------------------
-
         if (
             event.touches.length === 1
         ) {
@@ -2079,10 +3373,6 @@ fullCanvas.addEventListener(
                 event.touches[0].clientY;
         }
 
-
-        // --------------------------------
-        // 2 DOIGTS
-        // --------------------------------
 
         if (
             event.touches.length === 2
@@ -2109,13 +3399,13 @@ fullCanvas.addEventListener(
 
     },
     {
-        passive:false
+        passive: false
     }
 );
 
 
 // ============================================================
-// MOUVEMENT SUR LA CARTE
+// MOUVEMENT CARTE
 // ============================================================
 
 fullCanvas.addEventListener(
@@ -2124,10 +3414,6 @@ fullCanvas.addEventListener(
 
         event.preventDefault();
 
-
-        // --------------------------------
-        // DÉPLACEMENT
-        // --------------------------------
 
         if (
             event.touches.length === 1 &&
@@ -2162,10 +3448,6 @@ fullCanvas.addEventListener(
         }
 
 
-        // --------------------------------
-        // PINCH ZOOM
-        // --------------------------------
-
         if (
             event.touches.length === 2 &&
             mapPinching
@@ -2178,15 +3460,14 @@ fullCanvas.addEventListener(
                 );
 
 
-            const difference =
-                distance -
+            const ratio =
+                distance /
                 mapStartDistance;
 
 
             mapZoom =
-                mapStartZoom +
-                difference *
-                0.00015;
+                mapStartZoom *
+                ratio;
 
 
             mapZoom =
@@ -2204,13 +3485,13 @@ fullCanvas.addEventListener(
 
     },
     {
-        passive:false
+        passive: false
     }
 );
 
 
 // ============================================================
-// FIN DU TOUCHER
+// FIN TOUCH CARTE
 // ============================================================
 
 fullCanvas.addEventListener(
@@ -2223,7 +3504,6 @@ fullCanvas.addEventListener(
 
             mapDragging =
                 false;
-
 
             mapPinching =
                 false;
@@ -2252,7 +3532,7 @@ fullCanvas.addEventListener(
 
     },
     {
-        passive:false
+        passive: false
     }
 );
 
@@ -2261,39 +3541,55 @@ fullCanvas.addEventListener(
 // MULTIJOUEUR
 // ============================================================
 
-document
-    .getElementById(
+const multiMenu =
+    document.getElementById(
         "multiMenu"
-    )
-    .addEventListener(
+    );
+
+
+if (multiMenu) {
+
+    multiMenu.addEventListener(
         "click",
         () => {
 
             multi.style.display =
                 "flex";
+
         }
+    );
+}
+
+
+const closeMulti =
+    document.getElementById(
+        "closeMulti"
     );
 
 
-document
-    .getElementById(
-        "closeMulti"
-    )
-    .addEventListener(
+if (closeMulti) {
+
+    closeMulti.addEventListener(
         "click",
         () => {
 
             multi.style.display =
                 "none";
+
         }
+    );
+}
+
+
+const createRoom =
+    document.getElementById(
+        "createRoom"
     );
 
 
-document
-    .getElementById(
-        "createRoom"
-    )
-    .addEventListener(
+if (createRoom) {
+
+    createRoom.addEventListener(
         "click",
         () => {
 
@@ -2332,13 +3628,18 @@ document
             );
         }
     );
+}
 
 
-document
-    .getElementById(
+const joinRoom =
+    document.getElementById(
         "joinRoom"
-    )
-    .addEventListener(
+    );
+
+
+if (joinRoom) {
+
+    joinRoom.addEventListener(
         "click",
         () => {
 
@@ -2371,7 +3672,12 @@ document
             );
         }
     );
+}
 
+
+// ============================================================
+// CONNEXION MULTI
+// ============================================================
 
 function connectMultiplayer(
     name,
@@ -2400,11 +3706,11 @@ function connectMultiplayer(
                 multiplayerSocket.send(
                     JSON.stringify({
 
-                        type:"join",
+                        type: "join",
 
-                        name:name,
+                        name,
 
-                        room:room
+                        room
 
                     })
                 );
@@ -2418,6 +3724,31 @@ function connectMultiplayer(
             };
 
 
+        multiplayerSocket.onmessage =
+            event => {
+
+                try {
+
+                    const data =
+                        JSON.parse(
+                            event.data
+                        );
+
+
+                    handleMultiplayerMessage(
+                        data
+                    );
+
+                } catch (error) {
+
+                    console.warn(
+                        "Message multi invalide",
+                        error
+                    );
+                }
+            };
+
+
         multiplayerSocket.onerror =
             () => {
 
@@ -2425,6 +3756,16 @@ function connectMultiplayer(
                     "multiStatus"
                 ).textContent =
                     "⚠️ Le serveur multijoueur n'est pas configuré.";
+            };
+
+
+        multiplayerSocket.onclose =
+            () => {
+
+                document.getElementById(
+                    "multiStatus"
+                ).textContent =
+                    "🔴 Déconnecté.";
             };
 
 
@@ -2440,6 +3781,198 @@ function connectMultiplayer(
         ).textContent =
             "⚠️ Multijoueur indisponible.";
     }
+}
+
+
+// ============================================================
+// POSITION MULTI
+// ============================================================
+
+function sendMultiplayerPosition() {
+
+    if (
+        !multiplayerSocket ||
+        multiplayerSocket.readyState !==
+        WebSocket.OPEN ||
+        !player
+    ) {
+
+        return;
+    }
+
+
+    multiplayerSocket.send(
+        JSON.stringify({
+
+            type: "position",
+
+            x:
+                player.position.x,
+
+            z:
+                player.position.z,
+
+            rotation:
+                player.rotation.y
+
+        })
+    );
+}
+
+
+function handleMultiplayerMessage(
+    data
+) {
+
+    // Cette partie est volontairement compatible
+    // avec différents serveurs WebSocket.
+
+    if (
+        data.type === "players"
+    ) {
+
+        updateOtherPlayers(
+            data.players || []
+        );
+
+        return;
+    }
+
+
+    if (
+        data.type === "player"
+    ) {
+
+        updateOtherPlayers(
+            [data]
+        );
+    }
+}
+
+
+// ============================================================
+// JOUEURS DISTANTS
+// ============================================================
+
+const otherPlayers =
+    new Map();
+
+
+function updateOtherPlayers(
+    players
+) {
+
+    players.forEach(
+        remote => {
+
+            if (
+                !remote.id
+            ) {
+
+                return;
+            }
+
+
+            let remotePlayer =
+                otherPlayers.get(
+                    remote.id
+                );
+
+
+            if (!remotePlayer) {
+
+                remotePlayer =
+                    createRemotePlayer(
+                        remote.name
+                    );
+
+
+                otherPlayers.set(
+                    remote.id,
+                    remotePlayer
+                );
+            }
+
+
+            if (
+                Number.isFinite(
+                    remote.x
+                )
+            ) {
+
+                remotePlayer.position.x =
+                    remote.x;
+            }
+
+
+            if (
+                Number.isFinite(
+                    remote.z
+                )
+            ) {
+
+                remotePlayer.position.z =
+                    remote.z;
+            }
+
+
+            if (
+                Number.isFinite(
+                    remote.rotation
+                )
+            ) {
+
+                remotePlayer.rotation.y =
+                    remote.rotation;
+            }
+        }
+    );
+}
+
+
+function createRemotePlayer(
+    name
+) {
+
+    const group =
+        new THREE.Group();
+
+
+    const body =
+        new THREE.Mesh(
+
+            new THREE.BoxGeometry(
+                2.8,
+                1,
+                4.8
+            ),
+
+            new THREE.MeshStandardMaterial({
+                color: 0xff3030
+            })
+
+        );
+
+
+    body.position.y =
+        1;
+
+
+    group.add(
+        body
+    );
+
+
+    group.userData.name =
+        name;
+
+
+    scene.add(
+        group
+    );
+
+
+    return group;
 }
 
 
@@ -2476,7 +4009,10 @@ window.addEventListener(
     "resize",
     () => {
 
-        if (camera) {
+        if (
+            camera &&
+            renderer
+        ) {
 
             camera.aspect =
                 innerWidth /
@@ -2508,3 +4044,8 @@ window.addEventListener(
         }
     }
 );
+
+
+// ============================================================
+// FIN
+// ============================================================
