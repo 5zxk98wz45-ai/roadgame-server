@@ -1,6 +1,6 @@
 // ============================================================
-// ROADGAME - VRAIE CARTE 3D
-// Utilise Nominatim + OpenStreetMap + Overpass
+// ROADGAME
+// Carte réelle + 3D + joystick + mini-carte + multijoueur UI
 // ============================================================
 
 const NOMINATIM =
@@ -14,26 +14,30 @@ let camera;
 let renderer;
 let player;
 
-let gameStarted = false;
-
 let centerLat = 0;
 let centerLon = 0;
 
-let playerX = 0;
-let playerZ = 0;
+let worldData = [];
+
+let gameStarted = false;
 
 let cameraAngle = 0;
 
 let speed = 0.55;
 
-let roadObjects = [];
+let moveX = 0;
+let moveY = 0;
 
-let keys = {
-    forward: false,
-    back: false,
-    left: false,
-    right: false
-};
+let joystickActive = false;
+
+let lastTouchX = null;
+
+let multiplayerSocket = null;
+
+
+// ============================================================
+// ELEMENTS
+// ============================================================
 
 const game =
     document.getElementById("game");
@@ -59,17 +63,29 @@ const loadingText =
 const hud =
     document.getElementById("hud");
 
-const info =
-    document.getElementById("info");
+const locationName =
+    document.getElementById("locationName");
 
-const controls =
-    document.getElementById("controls");
+const joystick =
+    document.getElementById("joystick");
 
-const cameraUI =
-    document.getElementById("camera");
+const stick =
+    document.getElementById("stick");
 
-const vehiclePanel =
-    document.getElementById("vehiclePanel");
+const miniMap =
+    document.getElementById("miniMap");
+
+const miniCanvas =
+    document.getElementById("miniMapCanvas");
+
+const fullMap =
+    document.getElementById("fullscreenMap");
+
+const fullCanvas =
+    document.getElementById("fullMapCanvas");
+
+const multi =
+    document.getElementById("multiplayer");
 
 
 // ============================================================
@@ -83,12 +99,11 @@ play.addEventListener(
 
 locationInput.addEventListener(
     "keydown",
-    e => {
+    event => {
 
-        if (e.key === "Enter") {
+        if (event.key === "Enter") {
             startGame();
         }
-
     }
 );
 
@@ -109,20 +124,17 @@ async function startGame() {
     loading.style.display =
         "flex";
 
-    message.textContent = "";
-
     try {
 
         loadingText.textContent =
-            "📍 Recherche de " + query + "...";
+            "📍 Recherche de " + query;
 
         const place =
             await geocode(query);
 
         if (!place) {
-
             throw new Error(
-                "Lieu introuvable."
+                "Adresse ou ville introuvable."
             );
         }
 
@@ -132,25 +144,34 @@ async function startGame() {
         centerLon =
             Number(place.lon);
 
-        loadingText.textContent =
-            "🛣️ Récupération des routes et bâtiments...";
 
-        const osm =
+        loadingText.textContent =
+            "🛣️ Téléchargement des routes...";
+
+
+        const data =
             await getOSMData(
                 centerLat,
                 centerLon
             );
 
+
+        worldData =
+            data;
+
+
         loadingText.textContent =
             "🏙️ Construction de la ville 3D...";
+
 
         initThree();
 
         buildWorld(
-            osm
+            data
         );
 
         createPlayer();
+
 
         menu.style.display =
             "none";
@@ -158,28 +179,40 @@ async function startGame() {
         hud.style.display =
             "block";
 
-        controls.style.display =
+        joystick.style.display =
             "block";
 
-        cameraUI.style.display =
+        document.getElementById(
+            "cameraButtons"
+        ).style.display =
             "block";
 
-        vehiclePanel.style.display =
+        document.getElementById(
+            "vehiclePanel"
+        ).style.display =
             "block";
 
-        info.textContent =
+
+        locationName.textContent =
             "📍 " +
             (
                 place.display_name ||
                 query
             );
 
+
         gameStarted =
             true;
+
+
+        resizeMaps();
+
+        drawMiniMap();
 
         updateCamera();
 
         animate();
+
 
     } catch (error) {
 
@@ -206,9 +239,7 @@ async function startGame() {
 // GÉOCODAGE
 // ============================================================
 
-async function geocode(
-    query
-) {
+async function geocode(query) {
 
     const url =
         NOMINATIM +
@@ -219,18 +250,22 @@ async function geocode(
             query
         );
 
+
     const response =
         await fetch(url);
+
 
     if (!response.ok) {
 
         throw new Error(
-            "Le service de recherche est indisponible."
+            "Le service de localisation ne répond pas."
         );
     }
 
+
     const results =
         await response.json();
+
 
     if (
         !results ||
@@ -240,12 +275,13 @@ async function geocode(
         return null;
     }
 
+
     return results[0];
 }
 
 
 // ============================================================
-// OBTENIR LES DONNÉES OSM
+// OSM
 // ============================================================
 
 async function getOSMData(
@@ -253,11 +289,9 @@ async function getOSMData(
     lon
 ) {
 
-    // Environ 1 km autour
-    // du point demandé.
-
     const delta =
         0.009;
+
 
     const south =
         lat - delta;
@@ -273,13 +307,11 @@ async function getOSMData(
 
 
     const query = `
-[out:json][timeout:30];
-
+[out:json][timeout:40];
 (
   way["highway"](${south},${west},${north},${east});
   way["building"](${south},${west},${north},${east});
 );
-
 out body geom;
 `;
 
@@ -288,12 +320,12 @@ out body geom;
         await fetch(
             OVERPASS,
             {
-                method: "POST",
-                body: query,
-                headers: {
+                method:"POST",
+                headers:{
                     "Content-Type":
                         "text/plain"
-                }
+                },
+                body:query
             }
         );
 
@@ -301,7 +333,7 @@ out body geom;
     if (!response.ok) {
 
         throw new Error(
-            "Overpass ne répond pas."
+            "Impossible de récupérer les données de la carte."
         );
     }
 
@@ -310,23 +342,12 @@ out body geom;
         await response.json();
 
 
-    if (
-        !data.elements ||
-        data.elements.length === 0
-    ) {
-
-        throw new Error(
-            "Aucune donnée cartographique trouvée autour de cet endroit."
-        );
-    }
-
-
-    return data.elements;
+    return data.elements || [];
 }
 
 
 // ============================================================
-// THREE.JS
+// THREE
 // ============================================================
 
 function initThree() {
@@ -348,45 +369,44 @@ function initThree() {
 
     scene.background =
         new THREE.Color(
-            0x76bff2
+            0x75bff0
         );
 
 
     scene.fog =
         new THREE.Fog(
-            0x76bff2,
+            0x75bff0,
             250,
-            1300
+            1400
         );
 
 
     camera =
         new THREE.PerspectiveCamera(
             65,
-            window.innerWidth /
-            window.innerHeight,
-            0.1,
-            2000
+            innerWidth / innerHeight,
+            .1,
+            2500
         );
 
 
     renderer =
         new THREE.WebGLRenderer({
-            antialias: true
+            antialias:true
         });
 
 
     renderer.setPixelRatio(
         Math.min(
-            window.devicePixelRatio,
+            devicePixelRatio,
             2
         )
     );
 
 
     renderer.setSize(
-        window.innerWidth,
-        window.innerHeight
+        innerWidth,
+        innerHeight
     );
 
 
@@ -401,23 +421,25 @@ function initThree() {
     );
 
 
-    const skyLight =
+    const ambient =
         new THREE.HemisphereLight(
             0xffffff,
             0x557755,
-            2.5
+            2.7
         );
 
+
     scene.add(
-        skyLight
+        ambient
     );
 
 
     const sun =
         new THREE.DirectionalLight(
             0xffffff,
-            3
+            3.2
         );
+
 
     sun.position.set(
         300,
@@ -425,33 +447,58 @@ function initThree() {
         200
     );
 
+
     sun.castShadow =
         true;
 
+
     scene.add(
         sun
-    );
-
-
-    window.addEventListener(
-        "resize",
-        resize
     );
 }
 
 
 // ============================================================
-// CONSTRUIRE LE MONDE OSM
+// GPS -> 3D
+// ============================================================
+
+function gpsToWorld(
+    lat,
+    lon
+) {
+
+    const metersLat =
+        111320;
+
+
+    const metersLon =
+        111320 *
+        Math.cos(
+            centerLat *
+            Math.PI /
+            180
+        );
+
+
+    return {
+        x:
+            (lon - centerLon)
+            * metersLon,
+
+        z:
+            -(lat - centerLat)
+            * metersLat
+    };
+}
+
+
+// ============================================================
+// MONDE
 // ============================================================
 
 function buildWorld(
     elements
 ) {
-
-    roadObjects = [];
-
-
-    // SOL
 
     const ground =
         new THREE.Mesh(
@@ -460,8 +507,8 @@ function buildWorld(
                 2500
             ),
             new THREE.MeshStandardMaterial({
-                color: 0x57964f,
-                roughness: 1
+                color:0x5b9b52,
+                roughness:1
             })
         );
 
@@ -469,8 +516,10 @@ function buildWorld(
     ground.rotation.x =
         -Math.PI / 2;
 
+
     ground.receiveShadow =
         true;
+
 
     scene.add(
         ground
@@ -482,11 +531,9 @@ function buildWorld(
     ) {
 
         if (
-            element.type !==
-            "way" ||
+            element.type !== "way" ||
             !element.geometry
         ) {
-
             continue;
         }
 
@@ -496,7 +543,7 @@ function buildWorld(
             element.tags.building
         ) {
 
-            createBuildingFromOSM(
+            createBuilding(
                 element
             );
 
@@ -509,7 +556,7 @@ function buildWorld(
             element.tags.highway
         ) {
 
-            createRoadFromOSM(
+            createRoad(
                 element
             );
         }
@@ -518,112 +565,58 @@ function buildWorld(
 
 
 // ============================================================
-// CONVERSION GPS -> MONDE 3D
+// ROUTES
 // ============================================================
 
-function gpsToWorld(
-    lat,
-    lon
-) {
-
-    const metersLat =
-        111320;
-
-    const metersLon =
-        111320 *
-        Math.cos(
-            centerLat *
-            Math.PI /
-            180
-        );
-
-
-    const x =
-        (
-            lon -
-            centerLon
-        ) *
-        metersLon;
-
-
-    const z =
-        -(
-            lat -
-            centerLat
-        ) *
-        metersLat;
-
-
-    return {
-        x,
-        z
-    };
-}
-
-
-// ============================================================
-// ROUTE OSM
-// ============================================================
-
-function createRoadFromOSM(
+function createRoad(
     way
 ) {
 
-    const highway =
-        way.tags.highway;
-
-
-    const allowed = [
+    const valid = [
         "motorway",
         "trunk",
         "primary",
         "secondary",
         "tertiary",
-        "unclassified",
         "residential",
         "living_street",
+        "unclassified",
         "service"
     ];
 
 
     if (
-        !allowed.includes(
-            highway
+        !valid.includes(
+            way.tags.highway
         )
     ) {
-
         return;
     }
 
 
-    let width =
-        5;
+    let width = 5;
 
 
-    if (
-        highway === "motorway" ||
-        highway === "trunk"
+    switch (
+        way.tags.highway
     ) {
 
-        width = 12;
+        case "motorway":
+        case "trunk":
+            width = 12;
+            break;
 
-    } else if (
-        highway === "primary"
-    ) {
+        case "primary":
+            width = 9;
+            break;
 
-        width = 9;
+        case "secondary":
+            width = 8;
+            break;
 
-    } else if (
-        highway === "secondary"
-    ) {
-
-        width = 8;
-
-    } else if (
-        highway === "tertiary"
-    ) {
-
-        width = 7;
+        case "tertiary":
+            width = 7;
+            break;
     }
 
 
@@ -638,30 +631,19 @@ function createRoadFromOSM(
 
 
     for (
-        let i = 0;
-        i < points.length - 1;
+        let i=0;
+        i<points.length-1;
         i++
     ) {
 
-        const a =
-            points[i];
-
-        const b =
-            points[i + 1];
-
-
         createRoadSegment(
-            a,
-            b,
+            points[i],
+            points[i+1],
             width
         );
     }
 }
 
-
-// ============================================================
-// SEGMENT ROUTE
-// ============================================================
 
 function createRoadSegment(
     a,
@@ -678,43 +660,36 @@ function createRoadSegment(
 
     const length =
         Math.sqrt(
-            dx * dx +
-            dz * dz
+            dx*dx +
+            dz*dz
         );
 
 
     if (
-        length < 1
-    )
+        length < .5
+    ) {
         return;
-
-
-    const geometry =
-        new THREE.BoxGeometry(
-            width,
-            0.12,
-            length
-        );
-
-
-    const material =
-        new THREE.MeshStandardMaterial({
-            color: 0x333333,
-            roughness: 1
-        });
+    }
 
 
     const road =
         new THREE.Mesh(
-            geometry,
-            material
+            new THREE.BoxGeometry(
+                width,
+                .12,
+                length
+            ),
+            new THREE.MeshStandardMaterial({
+                color:0x3b3b3b,
+                roughness:.9
+            })
         );
 
 
     road.position.set(
-        (a.x + b.x) / 2,
-        0.04,
-        (a.z + b.z) / 2
+        (a.x+b.x)/2,
+        .06,
+        (a.z+b.z)/2
     );
 
 
@@ -734,25 +709,59 @@ function createRoadSegment(
     );
 
 
-    roadObjects.push(
-        road
-    );
+    // Ligne centrale pour améliorer
+    // visuellement les grandes routes.
+
+    if (
+        width >= 8
+    ) {
+
+        const line =
+            new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    .12,
+                    .02,
+                    length
+                ),
+                new THREE.MeshBasicMaterial({
+                    color:0xffffff
+                })
+            );
+
+
+        line.position.copy(
+            road.position
+        );
+
+
+        line.position.y =
+            .13;
+
+
+        line.rotation.y =
+            road.rotation.y;
+
+
+        scene.add(
+            line
+        );
+    }
 }
 
 
 // ============================================================
-// BÂTIMENT OSM
+// BÂTIMENTS
 // ============================================================
 
-function createBuildingFromOSM(
+function createBuilding(
     way
 ) {
 
     if (
-        way.geometry.length <
-        3
-    )
+        way.geometry.length < 3
+    ) {
         return;
+    }
 
 
     const points =
@@ -765,17 +774,10 @@ function createBuildingFromOSM(
         );
 
 
-    let minX =
-        Infinity;
-
-    let maxX =
-        -Infinity;
-
-    let minZ =
-        Infinity;
-
-    let maxZ =
-        -Infinity;
+    let minX=Infinity;
+    let maxX=-Infinity;
+    let minZ=Infinity;
+    let maxZ=-Infinity;
 
 
     points.forEach(
@@ -809,107 +811,102 @@ function createBuildingFromOSM(
 
 
     const width =
-        maxX - minX;
+        Math.min(
+            maxX-minX,
+            80
+        );
+
 
     const depth =
-        maxZ - minZ;
+        Math.min(
+            maxZ-minZ,
+            80
+        );
 
 
     if (
         width < 2 ||
         depth < 2
-    )
+    ) {
         return;
+    }
 
 
-    // hauteur OSM si disponible
-
-    let height =
-        7;
+    let height = 6;
 
 
     if (
-        way.tags &&
         way.tags.height
     ) {
 
-        const parsed =
+        const h =
             parseFloat(
                 way.tags.height
             );
 
-        if (
-            Number.isFinite(
-                parsed
-            )
-        ) {
 
+        if (
+            Number.isFinite(h)
+        ) {
             height =
-                Math.max(
-                    3,
-                    Math.min(
-                        parsed,
-                        80
-                    )
+                Math.min(
+                    Math.max(
+                        h,
+                        3
+                    ),
+                    80
                 );
         }
     }
 
 
-    const levels =
-        parseInt(
-            way.tags &&
-            way.tags["building:levels"]
-        );
-
-
     if (
-        Number.isFinite(
-            levels
-        )
+        way.tags["building:levels"]
     ) {
 
-        height =
-            Math.max(
-                3,
-                Math.min(
-                    levels * 3,
-                    80
-                )
+        const levels =
+            parseInt(
+                way.tags["building:levels"]
             );
+
+
+        if (
+            Number.isFinite(levels)
+        ) {
+
+            height =
+                Math.min(
+                    Math.max(
+                        levels*3,
+                        3
+                    ),
+                    80
+                );
+        }
     }
-
-
-    const material =
-        new THREE.MeshStandardMaterial({
-            color:
-                randomBuildingColor(),
-            roughness:
-                .85
-        });
 
 
     const building =
         new THREE.Mesh(
             new THREE.BoxGeometry(
-                Math.min(
-                    width,
-                    80
-                ),
+                width,
                 height,
-                Math.min(
-                    depth,
-                    80
-                )
+                depth
             ),
-            material
+            new THREE.MeshStandardMaterial({
+                color:
+                    buildingColor(
+                        way.tags.building
+                    ),
+                roughness:.82
+            })
         );
 
 
     building.position.set(
-        (minX + maxX) / 2,
-        height / 2,
-        (minZ + maxZ) / 2
+        (minX+maxX)/2,
+        height/2,
+        (minZ+maxZ)/2
     );
 
 
@@ -923,6 +920,48 @@ function createBuildingFromOSM(
     scene.add(
         building
     );
+}
+
+
+function buildingColor(
+    type
+) {
+
+    if (
+        type === "industrial"
+    )
+        return 0x9da3a8;
+
+    if (
+        type === "commercial"
+    )
+        return 0xc6c6c6;
+
+    if (
+        type === "school"
+    )
+        return 0xe2c18f;
+
+    if (
+        type === "church"
+    )
+        return 0xd8d0c0;
+
+    const colors = [
+        0xd7d1c5,
+        0xc9c9c9,
+        0xe1c7aa,
+        0xbfc8cc,
+        0xd6b9a0
+    ];
+
+
+    return colors[
+        Math.floor(
+            Math.random() *
+            colors.length
+        )
+    ];
 }
 
 
@@ -944,8 +983,8 @@ function createPlayer() {
                 4.8
             ),
             new THREE.MeshStandardMaterial({
-                color: 0x1264ff,
-                roughness: .6
+                color:0x1264ff,
+                roughness:.5
             })
         );
 
@@ -967,11 +1006,11 @@ function createPlayer() {
         new THREE.Mesh(
             new THREE.BoxGeometry(
                 2.1,
-                .75,
+                .7,
                 2.3
             ),
             new THREE.MeshStandardMaterial({
-                color: 0x20252b
+                color:0x20252a
             })
         );
 
@@ -983,16 +1022,12 @@ function createPlayer() {
     );
 
 
-    roof.castShadow =
-        true;
-
-
     player.add(
         roof
     );
 
 
-    const wheelGeo =
+    const wheelGeometry =
         new THREE.CylinderGeometry(
             .5,
             .5,
@@ -1001,34 +1036,40 @@ function createPlayer() {
         );
 
 
-    const wheelMat =
+    const wheelMaterial =
         new THREE.MeshStandardMaterial({
-            color: 0x111111
+            color:0x111111
         });
 
 
-    [
+    const wheels = [
         [-1.45,.5,-1.55],
         [1.45,.5,-1.55],
         [-1.45,.5,1.55],
         [1.45,.5,1.55]
-    ].forEach(
+    ];
+
+
+    wheels.forEach(
         p => {
 
             const wheel =
                 new THREE.Mesh(
-                    wheelGeo,
-                    wheelMat
+                    wheelGeometry,
+                    wheelMaterial
                 );
 
+
             wheel.rotation.z =
-                Math.PI / 2;
+                Math.PI/2;
+
 
             wheel.position.set(
                 p[0],
                 p[1],
                 p[2]
             );
+
 
             player.add(
                 wheel
@@ -1056,18 +1097,12 @@ function createPlayer() {
 
 function updateCamera() {
 
-    if (
-        !camera ||
-        !player
-    )
+    if (!player)
         return;
 
 
-    const distance =
-        13;
-
-    const height =
-        7;
+    const distance = 13;
+    const height = 7;
 
 
     camera.position.x =
@@ -1099,13 +1134,12 @@ function updateCamera() {
 
 
 document
-    .getElementById("camLeft")
+    .getElementById("cameraLeft")
     .addEventListener(
         "click",
         () => {
 
-            cameraAngle -=
-                0.3;
+            cameraAngle -= .35;
 
             updateCamera();
         }
@@ -1113,17 +1147,239 @@ document
 
 
 document
-    .getElementById("camRight")
+    .getElementById("cameraRight")
     .addEventListener(
         "click",
         () => {
 
-            cameraAngle +=
-                0.3;
+            cameraAngle += .35;
 
             updateCamera();
         }
     );
+
+
+// ============================================================
+// JOYSTICK
+// ============================================================
+
+joystick.addEventListener(
+    "touchstart",
+    e => {
+
+        e.preventDefault();
+
+        joystickActive =
+            true;
+
+        updateJoystick(
+            e.touches[0]
+        );
+    },
+    {passive:false}
+);
+
+
+joystick.addEventListener(
+    "touchmove",
+    e => {
+
+        e.preventDefault();
+
+        if (
+            joystickActive
+        ) {
+
+            updateJoystick(
+                e.touches[0]
+            );
+        }
+    },
+    {passive:false}
+);
+
+
+joystick.addEventListener(
+    "touchend",
+    resetJoystick
+);
+
+
+joystick.addEventListener(
+    "touchcancel",
+    resetJoystick
+);
+
+
+function updateJoystick(
+    touch
+) {
+
+    const rect =
+        joystick.getBoundingClientRect();
+
+
+    const centerX =
+        rect.left +
+        rect.width/2;
+
+
+    const centerY =
+        rect.top +
+        rect.height/2;
+
+
+    let dx =
+        touch.clientX -
+        centerX;
+
+
+    let dy =
+        touch.clientY -
+        centerY;
+
+
+    const max =
+        rect.width/2 -
+        32;
+
+
+    const length =
+        Math.sqrt(
+            dx*dx +
+            dy*dy
+        );
+
+
+    if (
+        length > max
+    ) {
+
+        dx =
+            dx/length *
+            max;
+
+        dy =
+            dy/length *
+            max;
+    }
+
+
+    stick.style.transform =
+        `translate(${dx}px,${dy}px)`;
+
+
+    moveX =
+        dx/max;
+
+
+    moveY =
+        dy/max;
+}
+
+
+function resetJoystick() {
+
+    joystickActive =
+        false;
+
+    moveX = 0;
+    moveY = 0;
+
+    stick.style.transform =
+        "translate(0,0)";
+}
+
+
+// ============================================================
+// ROTATION AVEC LE DOIGT
+// ============================================================
+
+rendererTouchSetup();
+
+
+function rendererTouchSetup() {
+
+    document.addEventListener(
+        "touchstart",
+        e => {
+
+            if (
+                e.target.closest(
+                    "#joystick"
+                ) ||
+                e.target.closest(
+                    "#miniMap"
+                )
+            ) {
+                return;
+            }
+
+
+            if (
+                e.touches.length === 1
+            ) {
+
+                lastTouchX =
+                    e.touches[0].clientX;
+            }
+        },
+        {passive:true}
+    );
+
+
+    document.addEventListener(
+        "touchmove",
+        e => {
+
+            if (
+                e.target.closest(
+                    "#joystick"
+                )
+            ) {
+                return;
+            }
+
+
+            if (
+                e.touches.length !== 1 ||
+                lastTouchX === null
+            ) {
+                return;
+            }
+
+
+            const x =
+                e.touches[0].clientX;
+
+
+            const delta =
+                x-lastTouchX;
+
+
+            cameraAngle -=
+                delta*.008;
+
+
+            lastTouchX =
+                x;
+
+
+            updateCamera();
+        },
+        {passive:true}
+    );
+
+
+    document.addEventListener(
+        "touchend",
+        () => {
+
+            lastTouchX =
+                null;
+        }
+    );
+}
 
 
 // ============================================================
@@ -1138,241 +1394,613 @@ function updatePlayer() {
         return;
 
 
-    let dx = 0;
-    let dz = 0;
-
-
-    if (keys.forward)
-        dz -= 1;
-
-    if (keys.back)
-        dz += 1;
-
-    if (keys.left)
-        dx -= 1;
-
-    if (keys.right)
-        dx += 1;
-
-
     if (
-        dx === 0 &&
-        dz === 0
-    )
+        Math.abs(moveX) < .05 &&
+        Math.abs(moveY) < .05
+    ) {
         return;
+    }
+
+
+    let dx =
+        moveX;
+
+    let dz =
+        moveY;
 
 
     const length =
         Math.sqrt(
-            dx * dx +
-            dz * dz
+            dx*dx +
+            dz*dz
         );
 
 
-    dx /= length;
-    dz /= length;
+    if (
+        length > 1
+    ) {
+
+        dx /= length;
+        dz /= length;
+    }
+
+
+    // Le joystick est relatif
+    // à la caméra.
+
+    const forwardX =
+        -Math.sin(
+            cameraAngle
+        );
+
+
+    const forwardZ =
+        -Math.cos(
+            cameraAngle
+        );
+
+
+    const rightX =
+        Math.cos(
+            cameraAngle
+        );
+
+
+    const rightZ =
+        -Math.sin(
+            cameraAngle
+        );
+
+
+    const worldX =
+        rightX*dx +
+        forwardX*(-dz);
+
+
+    const worldZ =
+        rightZ*dx +
+        forwardZ*(-dz);
 
 
     player.position.x +=
-        dx * speed;
+        worldX*speed;
 
 
     player.position.z +=
-        dz * speed;
+        worldZ*speed;
 
 
     player.rotation.y =
         Math.atan2(
-            dx,
-            dz
+            worldX,
+            worldZ
         );
 
 
     updateCamera();
+
+    drawMiniMap();
 }
 
 
 // ============================================================
-// CONTRÔLES IPHONE
+// MINI-CARTE
 // ============================================================
 
-document
-    .querySelectorAll(
-        "[data-control]"
+miniMap.addEventListener(
+    "click",
+    openFullMap
+);
+
+
+function resizeMaps() {
+
+    const dpr =
+        Math.min(
+            devicePixelRatio,
+            2
+        );
+
+
+    miniCanvas.width =
+        miniCanvas.clientWidth*dpr;
+
+
+    miniCanvas.height =
+        miniCanvas.clientHeight*dpr;
+
+
+    fullCanvas.width =
+        innerWidth*dpr;
+
+
+    fullCanvas.height =
+        innerHeight*dpr;
+}
+
+
+function drawMiniMap() {
+
+    if (
+        !gameStarted
     )
-    .forEach(
-        button => {
-
-            const control =
-                button.dataset.control;
+        return;
 
 
-            button.addEventListener(
-                "touchstart",
-                e => {
+    drawMap(
+        miniCanvas
+    );
+}
 
-                    e.preventDefault();
 
-                    keys[control] =
-                        true;
-                },
-                {
-                    passive: false
-                }
+function drawFullMap() {
+
+    drawMap(
+        fullCanvas
+    );
+}
+
+
+function drawMap(
+    canvas
+) {
+
+    const ctx =
+        canvas.getContext("2d");
+
+
+    const width =
+        canvas.width;
+
+
+    const height =
+        canvas.height;
+
+
+    ctx.clearRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+
+    ctx.fillStyle =
+        "#d8d3c8";
+
+
+    ctx.fillRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+
+    const scale =
+        canvas === miniCanvas
+            ? 0.20
+            : 0.055;
+
+
+    const centerX =
+        width/2;
+
+
+    const centerY =
+        height/2;
+
+
+    for (
+        const element of worldData
+    ) {
+
+        if (
+            !element.geometry
+        )
+            continue;
+
+
+        const isRoad =
+            element.tags &&
+            element.tags.highway;
+
+
+        const isBuilding =
+            element.tags &&
+            element.tags.building;
+
+
+        if (
+            !isRoad &&
+            !isBuilding
+        )
+            continue;
+
+
+        const points =
+            element.geometry.map(
+                p =>
+                    gpsToWorld(
+                        p.lat,
+                        p.lon
+                    )
             );
 
 
-            button.addEventListener(
-                "touchend",
-                e => {
-
-                    e.preventDefault();
-
-                    keys[control] =
-                        false;
-                },
-                {
-                    passive: false
-                }
-            );
+        if (
+            points.length < 2
+        )
+            continue;
 
 
-            button.addEventListener(
-                "touchcancel",
-                () => {
+        if (isRoad) {
 
-                    keys[control] =
-                        false;
-                }
-            );
+            ctx.strokeStyle =
+                "#777";
+
+
+            ctx.lineWidth =
+                canvas === miniCanvas
+                    ? 2
+                    : 4;
+
+
+        } else {
+
+            ctx.strokeStyle =
+                "#aaa";
+
+
+            ctx.fillStyle =
+                "#c8c1b5";
+
+
+            ctx.lineWidth =
+                1;
+        }
+
+
+        ctx.beginPath();
+
+
+        points.forEach(
+            (p,i) => {
+
+                const x =
+                    centerX +
+                    p.x*scale;
+
+
+                const y =
+                    centerY +
+                    p.z*scale;
+
+
+                if (i===0)
+                    ctx.moveTo(
+                        x,
+                        y
+                    );
+                else
+                    ctx.lineTo(
+                        x,
+                        y
+                    );
+            }
+        );
+
+
+        if (isBuilding) {
+
+            ctx.closePath();
+
+            ctx.fill();
+
+        } else {
+
+            ctx.stroke();
+        }
+    }
+
+
+    // Joueur
+
+    if (player) {
+
+        const x =
+            centerX +
+            player.position.x*
+            scale;
+
+
+        const y =
+            centerY +
+            player.position.z*
+            scale;
+
+
+        ctx.beginPath();
+
+        ctx.arc(
+            x,
+            y,
+            canvas === miniCanvas
+                ? 6
+                : 10,
+            0,
+            Math.PI*2
+        );
+
+
+        ctx.fillStyle =
+            "#e51c23";
+
+
+        ctx.fill();
+
+
+        // Direction
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            x,
+            y
+        );
+
+
+        ctx.lineTo(
+            x +
+            Math.sin(
+                player.rotation.y
+            )*
+            18,
+            y +
+            Math.cos(
+                player.rotation.y
+            )*
+            18
+        );
+
+
+        ctx.strokeStyle =
+            "#e51c23";
+
+
+        ctx.lineWidth =
+            3;
+
+
+        ctx.stroke();
+    }
+}
+
+
+// ============================================================
+// CARTE PLEIN ÉCRAN
+// ============================================================
+
+function openFullMap() {
+
+    if (
+        !gameStarted
+    )
+        return;
+
+
+    fullMap.style.display =
+        "block";
+
+
+    resizeMaps();
+
+    drawFullMap();
+}
+
+
+document
+    .getElementById("closeMap")
+    .addEventListener(
+        "click",
+        () => {
+
+            fullMap.style.display =
+                "none";
         }
     );
 
 
 // ============================================================
-// CLAVIER
-// ============================================================
-
-document.addEventListener(
-    "keydown",
-    e => {
-
-        if (
-            e.key === "ArrowUp" ||
-            e.key.toLowerCase() === "w"
-        )
-            keys.forward = true;
-
-
-        if (
-            e.key === "ArrowDown" ||
-            e.key.toLowerCase() === "s"
-        )
-            keys.back = true;
-
-
-        if (
-            e.key === "ArrowLeft" ||
-            e.key.toLowerCase() === "a"
-        )
-            keys.left = true;
-
-
-        if (
-            e.key === "ArrowRight" ||
-            e.key.toLowerCase() === "d"
-        )
-            keys.right = true;
-    }
-);
-
-
-document.addEventListener(
-    "keyup",
-    e => {
-
-        if (
-            e.key === "ArrowUp" ||
-            e.key.toLowerCase() === "w"
-        )
-            keys.forward = false;
-
-
-        if (
-            e.key === "ArrowDown" ||
-            e.key.toLowerCase() === "s"
-        )
-            keys.back = false;
-
-
-        if (
-            e.key === "ArrowLeft" ||
-            e.key.toLowerCase() === "a"
-        )
-            keys.left = false;
-
-
-        if (
-            e.key === "ArrowRight" ||
-            e.key.toLowerCase() === "d"
-        )
-            keys.right = false;
-    }
-);
-
-
-// ============================================================
-// VÉHICULES
+// MULTI
 // ============================================================
 
 document
-    .querySelectorAll(
-        "[data-vehicle]"
-    )
-    .forEach(
-        button => {
+    .getElementById("multiMenu")
+    .addEventListener(
+        "click",
+        () => {
 
-            button.addEventListener(
-                "click",
-                () => {
-
-                    if (!player)
-                        return;
+            multi.style.display =
+                "flex";
+        }
+    );
 
 
-                    const vehicle =
-                        button.dataset.vehicle;
+document
+    .getElementById("closeMulti")
+    .addEventListener(
+        "click",
+        () => {
+
+            multi.style.display =
+                "none";
+        }
+    );
 
 
-                    if (
-                        vehicle ===
-                        "car"
-                    ) {
+document
+    .getElementById("createRoom")
+    .addEventListener(
+        "click",
+        () => {
 
-                        speed =
-                            .55;
+            const name =
+                document.getElementById(
+                    "playerName"
+                ).value.trim();
 
-                    } else if (
-                        vehicle ===
-                        "truck"
-                    ) {
 
-                        speed =
-                            .35;
+            const code =
+                Math.random()
+                .toString(36)
+                .substring(
+                    2,
+                    8
+                )
+                .toUpperCase();
 
-                    } else {
 
-                        speed =
-                            .42;
-                    }
-                }
+            document.getElementById(
+                "roomCode"
+            ).value =
+                code;
+
+
+            document.getElementById(
+                "multiStatus"
+            ).textContent =
+                "🎮 Partie créée : " +
+                code;
+
+
+            connectMultiplayer(
+                name || "Joueur",
+                code
             );
         }
     );
 
 
+document
+    .getElementById("joinRoom")
+    .addEventListener(
+        "click",
+        () => {
+
+            const name =
+                document.getElementById(
+                    "playerName"
+                ).value.trim();
+
+
+            const code =
+                document.getElementById(
+                    "roomCode"
+                ).value.trim();
+
+
+            if (!code) {
+
+                document.getElementById(
+                    "multiStatus"
+                ).textContent =
+                    "❌ Entre un code.";
+
+                return;
+            }
+
+
+            connectMultiplayer(
+                name || "Joueur",
+                code
+            );
+        }
+    );
+
+
+function connectMultiplayer(
+    name,
+    room
+) {
+
+    /*
+     * Cette partie prépare la connexion.
+     *
+     * Elle fonctionne seulement si
+     * ton server.js possède un serveur
+     * WebSocket compatible.
+     */
+
+    try {
+
+        const protocol =
+            location.protocol === "https:"
+                ? "wss:"
+                : "ws:";
+
+
+        multiplayerSocket =
+            new WebSocket(
+                protocol +
+                "//" +
+                location.host
+            );
+
+
+        multiplayerSocket.onopen =
+            () => {
+
+                multiplayerSocket.send(
+                    JSON.stringify({
+                        type:"join",
+                        name:name,
+                        room:room
+                    })
+                );
+
+
+                document.getElementById(
+                    "multiStatus"
+                ).textContent =
+                    "🟢 Connecté à la partie " +
+                    room;
+            };
+
+
+        multiplayerSocket.onerror =
+            () => {
+
+                document.getElementById(
+                    "multiStatus"
+                ).textContent =
+                    "⚠️ Le serveur multijoueur n'est pas encore configuré.";
+            };
+
+
+        multiplayerSocket.onclose =
+            () => {
+
+                console.log(
+                    "Connexion multijoueur fermée."
+                );
+            };
+
+
+    } catch(error) {
+
+        console.error(error);
+
+        document.getElementById(
+            "multiStatus"
+        ).textContent =
+            "⚠️ Multijoueur indisponible.";
+    }
+}
+
+
 // ============================================================
-// BOUCLE
+// ANIMATION
 // ============================================================
 
 function animate() {
@@ -1400,50 +2028,39 @@ function animate() {
 // RESIZE
 // ============================================================
 
-function resize() {
+window.addEventListener(
+    "resize",
+    () => {
 
-    if (
-        !camera ||
-        !renderer
-    )
-        return;
+        if (camera) {
 
-
-    camera.aspect =
-        window.innerWidth /
-        window.innerHeight;
+            camera.aspect =
+                innerWidth /
+                innerHeight;
 
 
-    camera.updateProjectionMatrix();
+            camera.updateProjectionMatrix();
 
 
-    renderer.setSize(
-        window.innerWidth,
-        window.innerHeight
-    );
-}
+            renderer.setSize(
+                innerWidth,
+                innerHeight
+            );
+        }
 
 
-// ============================================================
-// COULEURS BÂTIMENTS
-// ============================================================
-
-function randomBuildingColor() {
-
-    const colors = [
-        0xd8d8d8,
-        0xc7d0d8,
-        0xe5c6a7,
-        0xbfc9d2,
-        0xf0d6bd,
-        0xc9bca9
-    ];
+        resizeMaps();
 
 
-    return colors[
-        Math.floor(
-            Math.random() *
-            colors.length
-        )
-    ];
-}
+        if (
+            fullMap.style.display ===
+            "block"
+        ) {
+
+            drawFullMap();
+        }
+
+
+        drawMiniMap();
+    }
+);
