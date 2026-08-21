@@ -2,39 +2,71 @@
 
 /* =========================================================
    ROADGAME V4
-   ========================================================= */
-
-/* =========================================================
-   SERVEUR
+   - Comptes
+   - Connexion
+   - Pseudos uniques
+   - Multijoueur
+   - Parties publiques / privées
+   - Partie rapide
+   - OpenStreetMap
+   - Recherche d'adresse
+   - Spawn aux coordonnées choisies
+   - Carte
+   - Zoom tactile
+   - Garage
+   - Véhicules
+   - Amis
+   - Paramètres
 ========================================================= */
 
-const SERVER_URL = "wss://roadgame-server.onrender.com";
+
+/* =========================================================
+   CONFIG SERVEUR
+========================================================= */
+
+const SERVER_URL =
+    "wss://roadgame-server.onrender.com";
+
+
+/* =========================================================
+   VARIABLES
+========================================================= */
 
 let socket = null;
+
 let connected = false;
 let loggedIn = false;
 
 let currentUser = null;
+
 let currentRoom = null;
 let currentPlayerId = null;
 
-let selectedVehicle = "car";
-
 let players = {};
+
+let selectedVehicle = "car";
 
 let gameStarted = false;
 
-let mapZoom = 1;
-
 let loadingProgress = 0;
-let connectionTimer = null;
-let reconnectTimer = null;
 
-let spawnLocation = {
+let selectedSpawn = {
     latitude: 48.8566,
     longitude: 2.3522,
-    address: "Paris, France"
+    address: "Paris"
 };
+
+let spawnMap = null;
+let spawnMarker = null;
+
+let gameMap = null;
+let playerMarker = null;
+
+let mapZoom = 13;
+
+let reconnectTimer = null;
+
+let addressSearchController = null;
 
 
 /* =========================================================
@@ -46,42 +78,60 @@ function $(id) {
 }
 
 function show(id) {
-    const el = $(id);
-    if (el) el.classList.remove("hidden");
+    const element = $(id);
+
+    if (element) {
+        element.classList.remove("hidden");
+    }
 }
 
 function hide(id) {
-    const el = $(id);
-    if (el) el.classList.add("hidden");
+    const element = $(id);
+
+    if (element) {
+        element.classList.add("hidden");
+    }
 }
 
 function setText(id, text) {
-    const el = $(id);
-    if (el) el.textContent = text;
+    const element = $(id);
+
+    if (element) {
+        element.textContent = text;
+    }
 }
 
 
 /* =========================================================
-   NOTIFICATIONS
+   NOTIFICATION
 ========================================================= */
 
 function notify(message) {
-    const container = $("notifications");
+
+    const container =
+        $("notifications");
 
     if (!container) {
-        console.log(message);
         return;
     }
 
-    const notification = document.createElement("div");
+    const notification =
+        document.createElement("div");
 
-    notification.className = "notification";
-    notification.textContent = message;
+    notification.className =
+        "notification";
 
-    container.appendChild(notification);
+    notification.textContent =
+        message;
+
+    container.appendChild(
+        notification
+    );
 
     setTimeout(() => {
+
         notification.remove();
+
     }, 4000);
 }
 
@@ -91,98 +141,54 @@ function notify(message) {
 ========================================================= */
 
 function authMessage(message, success = false) {
-    const el = $("authMessage");
 
-    if (!el) return;
+    const element =
+        $("authMessage");
 
-    el.textContent = message;
-    el.style.color = success ? "#35e875" : "#ff5555";
+    if (!element) {
+        return;
+    }
+
+    element.textContent =
+        message;
+
+    element.style.color =
+        success
+            ? "#20e875"
+            : "#ff5555";
 }
 
 function multiplayerMessage(message) {
-    setText("multiplayerMessage", message);
+
+    const element =
+        $("multiplayerMessage");
+
+    if (element) {
+        element.textContent =
+            message;
+    }
 }
 
 function privateMessage(message) {
-    setText("privateRoomMessage", message);
+
+    const element =
+        $("privateRoomMessage");
+
+    if (element) {
+        element.textContent =
+            message;
+    }
 }
 
 function usernameMessage(message) {
-    setText("usernameMessage", message);
-}
 
+    const element =
+        $("usernameMessage");
 
-/* =========================================================
-   LOADING
-========================================================= */
-
-function setLoadingProgress(value) {
-    loadingProgress = Math.max(0, Math.min(100, value));
-
-    const text = $("loadingText");
-
-    if (text) {
-        text.textContent =
-            "Chargement... " +
-            Math.round(loadingProgress) +
-            "%";
+    if (element) {
+        element.textContent =
+            message;
     }
-
-    const bar =
-        $("loadingBar") ||
-        $("loadingProgress");
-
-    if (bar) {
-        if (
-            bar.tagName === "PROGRESS"
-        ) {
-            bar.value = loadingProgress;
-        } else {
-            bar.style.width =
-                loadingProgress + "%";
-        }
-    }
-}
-
-function setLoadingText(text) {
-    const el = $("loadingText");
-
-    if (el) {
-        el.textContent = text;
-    }
-}
-
-function showAuthAfterLoading() {
-    hide("loadingScreen");
-    show("authScreen");
-}
-
-function loadingAnimation() {
-    let progress = 5;
-
-    const interval = setInterval(() => {
-
-        if (connected) {
-            clearInterval(interval);
-            return;
-        }
-
-        progress += Math.random() * 5;
-
-        /*
-         * IMPORTANT :
-         * On ne reste plus bloqué à 90 %.
-         */
-        if (progress >= 89) {
-            progress = 89;
-            setLoadingText(
-                "Connexion au serveur..."
-            );
-        }
-
-        setLoadingProgress(progress);
-
-    }, 250);
 }
 
 
@@ -195,70 +201,40 @@ function connectServer() {
     if (
         socket &&
         (
-            socket.readyState === WebSocket.OPEN ||
-            socket.readyState === WebSocket.CONNECTING
+            socket.readyState ===
+            WebSocket.OPEN ||
+            socket.readyState ===
+            WebSocket.CONNECTING
         )
     ) {
         return;
     }
 
-    clearTimeout(connectionTimer);
-
     setLoadingText(
         "Connexion au serveur..."
     );
 
-    setLoadingProgress(
-        Math.max(loadingProgress, 35)
-    );
-
     try {
-        socket = new WebSocket(
-            SERVER_URL
-        );
+
+        socket =
+            new WebSocket(
+                SERVER_URL
+            );
+
     } catch (error) {
 
         console.error(error);
 
-        serverConnectionFailed(
-            "Impossible de créer la connexion."
+        setLoadingText(
+            "Erreur de connexion."
         );
 
         return;
     }
 
-    /*
-     * Le serveur Render peut mettre quelques secondes
-     * à se réveiller.
-     *
-     * Mais on ne laisse jamais l'écran charger
-     * indéfiniment.
-     */
-    connectionTimer = setTimeout(() => {
-
-        if (!connected) {
-
-            console.warn(
-                "⏱️ Temps de connexion dépassé"
-            );
-
-            try {
-                socket.close();
-            } catch {}
-
-            serverConnectionFailed(
-                "Le serveur met trop de temps à répondre."
-            );
-        }
-
-    }, 15000);
-
-
     socket.addEventListener(
         "open",
         () => {
-
-            clearTimeout(connectionTimer);
 
             connected = true;
 
@@ -274,14 +250,15 @@ function connectServer() {
 
             setTimeout(() => {
 
-                if (!gameStarted) {
-                    showAuthAfterLoading();
+                hide("loadingScreen");
+
+                if (!loggedIn) {
+                    show("authScreen");
                 }
 
-            }, 400);
+            }, 300);
         }
     );
-
 
     socket.addEventListener(
         "message",
@@ -290,29 +267,24 @@ function connectServer() {
             let data;
 
             try {
+
                 data =
                     JSON.parse(
                         event.data
                     );
+
             } catch {
 
                 console.error(
-                    "Message invalide :",
-                    event.data
+                    "Message serveur invalide"
                 );
 
                 return;
             }
 
-            console.log(
-                "📩 Serveur :",
-                data
-            );
-
             handleServerMessage(data);
         }
     );
-
 
     socket.addEventListener(
         "close",
@@ -320,10 +292,8 @@ function connectServer() {
 
             connected = false;
 
-            clearTimeout(connectionTimer);
-
             console.log(
-                "🔴 WebSocket fermé"
+                "🔴 Serveur déconnecté"
             );
 
             if (!gameStarted) {
@@ -332,16 +302,17 @@ function connectServer() {
                     "Serveur déconnecté."
                 );
             }
+
+            scheduleReconnect();
         }
     );
-
 
     socket.addEventListener(
         "error",
         error => {
 
             console.error(
-                "WebSocket error :",
+                "WebSocket error",
                 error
             );
 
@@ -351,30 +322,26 @@ function connectServer() {
 }
 
 
-function serverConnectionFailed(message) {
+/* =========================================================
+   RECONNEXION
+========================================================= */
 
-    connected = false;
+function scheduleReconnect() {
 
-    setLoadingProgress(100);
+    if (reconnectTimer) {
+        return;
+    }
 
-    setLoadingText(
-        "Serveur indisponible"
-    );
+    reconnectTimer =
+        setTimeout(() => {
 
-    /*
-     * On affiche quand même l'écran de connexion.
-     * Le jeu ne reste donc plus bloqué au chargement.
-     */
-    setTimeout(() => {
+            reconnectTimer = null;
 
-        showAuthAfterLoading();
+            if (!connected) {
+                connectServer();
+            }
 
-        authMessage(
-            message +
-            " Tu peux réessayer."
-        );
-
-    }, 700);
+        }, 5000);
 }
 
 
@@ -384,32 +351,32 @@ function serverConnectionFailed(message) {
 
 function send(data) {
 
+    if (!socket) {
+
+        notify(
+            "Serveur non connecté."
+        );
+
+        return false;
+    }
+
     if (
-        !socket ||
-        socket.readyState !== WebSocket.OPEN
+        socket.readyState !==
+        WebSocket.OPEN
     ) {
 
-        console.warn(
-            "WebSocket non connecté"
+        notify(
+            "Serveur non connecté."
         );
 
         return false;
     }
 
-    try {
+    socket.send(
+        JSON.stringify(data)
+    );
 
-        socket.send(
-            JSON.stringify(data)
-        );
-
-        return true;
-
-    } catch (error) {
-
-        console.error(error);
-
-        return false;
-    }
+    return true;
 }
 
 
@@ -422,32 +389,19 @@ function handleServerMessage(data) {
     switch (data.type) {
 
         case "connected":
-            console.log(
-                "✅ Serveur prêt"
-            );
             break;
-
 
         case "account_created":
-            handleAccountCreated(
-                data.user
-            );
+            handleAccountCreated(data.user);
             break;
-
 
         case "login_success":
-            handleLoginSuccess(
-                data.user
-            );
+            handleLoginSuccess(data.user);
             break;
-
 
         case "error":
-            handleServerError(
-                data.message
-            );
+            handleServerError(data.message);
             break;
-
 
         case "username_changed":
 
@@ -468,11 +422,9 @@ function handleServerMessage(data) {
 
             break;
 
-
         case "room_created":
-            handleRoomCreated(data);
+            handleRoom(data);
             break;
-
 
         case "private_room_created":
 
@@ -483,16 +435,9 @@ function handleServerMessage(data) {
 
             break;
 
-
         case "room_joined":
-            handleRoomJoined(data);
+            handleRoom(data);
             break;
-
-
-        case "quick_match_found":
-            handleQuickMatch(data);
-            break;
-
 
         case "quick_match_searching":
 
@@ -502,17 +447,23 @@ function handleServerMessage(data) {
 
             break;
 
+        case "quick_match_found":
+
+            handleRoom(data);
+
+            notify(
+                "⚡ Partie trouvée !"
+            );
+
+            break;
 
         case "player_joined":
 
-            addPlayer(
-                data.player
-            );
+            addPlayer(data.player);
 
             refreshPlayersList();
 
             break;
-
 
         case "player_left":
 
@@ -524,7 +475,6 @@ function handleServerMessage(data) {
 
             break;
 
-
         case "player_update":
 
             updateRemotePlayer(
@@ -533,42 +483,42 @@ function handleServerMessage(data) {
 
             break;
 
-
         case "vehicle_update":
+
         case "vehicle_enter":
+
         case "vehicle_exit":
 
             updateRemoteVehicle(data);
 
             break;
 
-
         case "vehicle_purchased":
 
             if (currentUser) {
+
                 currentUser.vehicles =
                     data.vehicles;
             }
 
-            notify(
-                "🚗 Véhicule acheté !"
-            );
-
             renderGarage();
             renderShop();
 
-            break;
+            notify(
+                "🚗 Véhicule ajouté au garage !"
+            );
 
+            break;
 
         case "settings_updated":
 
             if (currentUser) {
+
                 currentUser.settings =
                     data.settings;
             }
 
             break;
-
 
         case "friend_request_sent":
 
@@ -579,10 +529,10 @@ function handleServerMessage(data) {
 
             break;
 
-
         case "friend_added":
 
             if (currentUser) {
+
                 currentUser =
                     data.user;
             }
@@ -591,31 +541,32 @@ function handleServerMessage(data) {
 
             break;
 
-
         default:
 
             console.log(
-                "Message serveur non géré :",
-                data.type
+                "Message serveur :",
+                data
             );
     }
 }
 
 
 /* =========================================================
-   ERREURS
+   ERREUR
 ========================================================= */
 
 function handleServerError(message) {
 
     console.error(
-        "❌ Serveur :",
+        "Serveur :",
         message
     );
 
     if (
         $("authScreen") &&
-        !$("authScreen").classList.contains("hidden")
+        !$("authScreen")
+            .classList
+            .contains("hidden")
     ) {
 
         authMessage(message);
@@ -624,7 +575,9 @@ function handleServerError(message) {
 
     if (
         $("multiplayerScreen") &&
-        !$("multiplayerScreen").classList.contains("hidden")
+        !$("multiplayerScreen")
+            .classList
+            .contains("hidden")
     ) {
 
         multiplayerMessage(message);
@@ -633,19 +586,12 @@ function handleServerError(message) {
 
     if (
         $("privateRoomScreen") &&
-        !$("privateRoomScreen").classList.contains("hidden")
+        !$("privateRoomScreen")
+            .classList
+            .contains("hidden")
     ) {
 
         privateMessage(message);
-        return;
-    }
-
-    if (
-        $("usernameScreen") &&
-        !$("usernameScreen").classList.contains("hidden")
-    ) {
-
-        usernameMessage(message);
         return;
     }
 
@@ -676,10 +622,9 @@ function handleAccountCreated(user) {
 
     setTimeout(
         openMainMenu,
-        500
+        300
     );
 }
-
 
 function handleLoginSuccess(user) {
 
@@ -704,7 +649,7 @@ function handleLoginSuccess(user) {
 
 
 /* =========================================================
-   INSCRIPTION
+   AUTH
 ========================================================= */
 
 function registerAccount() {
@@ -712,21 +657,20 @@ function registerAccount() {
     if (!connected) {
 
         authMessage(
-            "❌ Serveur non connecté. Attends quelques secondes puis réessaie."
+            "Le serveur n'est pas connecté."
         );
-
-        reconnectServer();
 
         return;
     }
 
     const username =
-        $("usernameInput")?.value.trim() ||
-        "";
+        $("usernameInput")
+            .value
+            .trim();
 
     const password =
-        $("passwordInput")?.value ||
-        "";
+        $("passwordInput")
+            .value;
 
     if (username.length < 3) {
 
@@ -758,44 +702,30 @@ function registerAccount() {
 }
 
 
-/* =========================================================
-   CONNEXION
-========================================================= */
-
 function loginAccount() {
 
     if (!connected) {
 
         authMessage(
-            "❌ Serveur non connecté."
+            "Le serveur n'est pas connecté."
         );
-
-        reconnectServer();
 
         return;
     }
 
     const username =
-        $("usernameInput")?.value.trim() ||
-        "";
+        $("usernameInput")
+            .value
+            .trim();
 
     const password =
-        $("passwordInput")?.value ||
-        "";
+        $("passwordInput")
+            .value;
 
-    if (!username) {
-
-        authMessage(
-            "Entre ton pseudo."
-        );
-
-        return;
-    }
-
-    if (!password) {
+    if (!username || !password) {
 
         authMessage(
-            "Entre ton mot de passe."
+            "Remplis les deux champs."
         );
 
         return;
@@ -810,33 +740,6 @@ function loginAccount() {
         username,
         password
     });
-}
-
-
-/* =========================================================
-   RECONNEXION
-========================================================= */
-
-function reconnectServer() {
-
-    if (
-        socket &&
-        (
-            socket.readyState === WebSocket.OPEN ||
-            socket.readyState === WebSocket.CONNECTING
-        )
-    ) {
-        return;
-    }
-
-    clearTimeout(reconnectTimer);
-
-    reconnectTimer =
-        setTimeout(() => {
-
-            connectServer();
-
-        }, 500);
 }
 
 
@@ -884,14 +787,15 @@ function playAsGuest() {
 
 function openMainMenu() {
 
-    hide("loadingScreen");
     hide("authScreen");
+    hide("loadingScreen");
     hide("multiplayerScreen");
     hide("privateRoomScreen");
     hide("roomScreen");
-    hide("friendsScreen");
+    hide("spawnScreen");
     hide("garageScreen");
     hide("shopScreen");
+    hide("friendsScreen");
     hide("settingsScreen");
     hide("usernameScreen");
     hide("mapScreen");
@@ -905,7 +809,7 @@ function openMainMenu() {
         (
             currentUser
                 ? currentUser.username
-                : "Joueur"
+                : "Invité"
         )
     );
 
@@ -916,12 +820,354 @@ function openMainMenu() {
 
 
 /* =========================================================
+   SPAWN SCREEN
+========================================================= */
+
+function openSpawnScreen() {
+
+    hide("mainMenu");
+
+    show("spawnScreen");
+
+    setTimeout(
+        initializeSpawnMap,
+        100
+    );
+}
+
+
+/* =========================================================
+   OPENSTREETMAP
+========================================================= */
+
+function initializeSpawnMap() {
+
+    if (!window.L) {
+
+        setText(
+            "addressResult",
+            "Impossible de charger la carte."
+        );
+
+        return;
+    }
+
+    if (!spawnMap) {
+
+        spawnMap =
+            L.map(
+                "spawnMap",
+                {
+                    zoomControl: true,
+                    attributionControl: true
+                }
+            );
+
+        L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+                maxZoom: 19,
+                attribution:
+                    "&copy; OpenStreetMap contributors"
+            }
+        ).addTo(spawnMap);
+
+    }
+
+    spawnMap.invalidateSize();
+
+    spawnMap.setView(
+        [
+            selectedSpawn.latitude,
+            selectedSpawn.longitude
+        ],
+        13
+    );
+
+    setSpawnMarker(
+        selectedSpawn.latitude,
+        selectedSpawn.longitude,
+        selectedSpawn.address
+    );
+}
+
+
+/* =========================================================
+   MARQUEUR SPAWN
+========================================================= */
+
+function setSpawnMarker(
+    latitude,
+    longitude,
+    address
+) {
+
+    if (!spawnMap) {
+        return;
+    }
+
+    if (spawnMarker) {
+
+        spawnMarker.setLatLng(
+            [
+                latitude,
+                longitude
+            ]
+        );
+
+    } else {
+
+        spawnMarker =
+            L.marker(
+                [
+                    latitude,
+                    longitude
+                ]
+            ).addTo(spawnMap);
+    }
+
+    spawnMarker.bindPopup(
+        "📍 Spawn ici<br>" +
+        escapeHtml(address || "Position")
+    );
+
+    spawnMarker.openPopup();
+
+    spawnMap.setView(
+        [
+            latitude,
+            longitude
+        ],
+        spawnMap.getZoom()
+    );
+}
+
+
+/* =========================================================
+   RECHERCHE ADRESSE
+   Nominatim / OpenStreetMap
+========================================================= */
+
+async function searchAddress() {
+
+    const input =
+        $("addressInput");
+
+    const result =
+        $("addressResult");
+
+    const button =
+        $("searchAddressButton");
+
+    if (!input || !result) {
+        return;
+    }
+
+    const query =
+        input.value.trim();
+
+    if (!query) {
+
+        result.textContent =
+            "Écris une adresse ou une ville.";
+
+        return;
+    }
+
+    if (addressSearchController) {
+
+        addressSearchController.abort();
+    }
+
+    addressSearchController =
+        new AbortController();
+
+    button.disabled = true;
+
+    result.textContent =
+        "🔎 Recherche...";
+
+    try {
+
+        const url =
+            "https://nominatim.openstreetmap.org/search?" +
+            new URLSearchParams({
+                q: query,
+                format: "jsonv2",
+                limit: "1",
+                addressdetails: "1",
+                "accept-language": "fr"
+            });
+
+        const response =
+            await fetch(
+                url,
+                {
+                    signal:
+                        addressSearchController.signal,
+
+                    headers: {
+                        "Accept":
+                            "application/json"
+                    }
+                }
+            );
+
+        if (!response.ok) {
+            throw new Error(
+                "Recherche impossible"
+            );
+        }
+
+        const results =
+            await response.json();
+
+        if (!results.length) {
+
+            result.textContent =
+                "❌ Adresse introuvable.";
+
+            return;
+        }
+
+        const place =
+            results[0];
+
+        const latitude =
+            Number(place.lat);
+
+        const longitude =
+            Number(place.lon);
+
+        if (
+            !Number.isFinite(latitude) ||
+            !Number.isFinite(longitude)
+        ) {
+
+            throw new Error(
+                "Coordonnées invalides"
+            );
+        }
+
+        selectedSpawn = {
+
+            latitude,
+
+            longitude,
+
+            address:
+                place.display_name
+        };
+
+        result.textContent =
+            "📍 " +
+            place.display_name;
+
+        setText(
+            "coordinatesText",
+            latitude.toFixed(6) +
+            " / " +
+            longitude.toFixed(6)
+        );
+
+        const spawnButton =
+            $("spawnHereButton");
+
+        if (spawnButton) {
+            spawnButton.disabled =
+                false;
+        }
+
+        if (spawnMap) {
+
+            spawnMap.setView(
+                [
+                    latitude,
+                    longitude
+                ],
+                16
+            );
+
+            setSpawnMarker(
+                latitude,
+                longitude,
+                place.display_name
+            );
+        }
+
+    } catch (error) {
+
+        if (
+            error.name ===
+            "AbortError"
+        ) {
+            return;
+        }
+
+        console.error(error);
+
+        result.textContent =
+            "❌ Impossible de rechercher cette adresse.";
+    } finally {
+
+        button.disabled = false;
+    }
+}
+
+
+/* =========================================================
+   SPAWN ICI
+========================================================= */
+
+function spawnHere() {
+
+    const latitude =
+        selectedSpawn.latitude;
+
+    const longitude =
+        selectedSpawn.longitude;
+
+    if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude)
+    ) {
+
+        notify(
+            "Choisis d'abord une adresse."
+        );
+
+        return;
+    }
+
+    notify(
+        "📍 Spawn à " +
+        selectedSpawn.address
+    );
+
+    /*
+       Si le joueur crée une partie,
+       les coordonnées sont envoyées
+       directement au serveur.
+    */
+
+    hide("spawnScreen");
+
+    show("multiplayerScreen");
+
+    multiplayerMessage(
+        "Position de spawn sélectionnée."
+    );
+}
+
+
+/* =========================================================
    MULTIJOUEUR
 ========================================================= */
 
 function openMultiplayer() {
 
     hide("mainMenu");
+
     show("multiplayerScreen");
 
     multiplayerMessage("");
@@ -936,8 +1182,6 @@ function createPublicRoom() {
             "Serveur non connecté."
         );
 
-        reconnectServer();
-
         return;
     }
 
@@ -948,10 +1192,10 @@ function createPublicRoom() {
             selectedVehicle,
 
         latitude:
-            spawnLocation.latitude,
+            selectedSpawn.latitude,
 
         longitude:
-            spawnLocation.longitude
+            selectedSpawn.longitude
     });
 }
 
@@ -959,6 +1203,7 @@ function createPublicRoom() {
 function openPrivateRoom() {
 
     hide("multiplayerScreen");
+
     show("privateRoomScreen");
 
     privateMessage("");
@@ -967,20 +1212,9 @@ function openPrivateRoom() {
 
 function createPrivateRoom() {
 
-    if (!connected) {
-
-        privateMessage(
-            "Serveur non connecté."
-        );
-
-        reconnectServer();
-
-        return;
-    }
-
     const password =
-        $("privatePasswordInput")?.value ||
-        "";
+        $("privatePasswordInput")
+            .value;
 
     if (!password) {
 
@@ -992,6 +1226,7 @@ function createPrivateRoom() {
     }
 
     send({
+
         type:
             "create_private_room",
 
@@ -1001,36 +1236,25 @@ function createPrivateRoom() {
             selectedVehicle,
 
         latitude:
-            spawnLocation.latitude,
+            selectedSpawn.latitude,
 
         longitude:
-            spawnLocation.longitude
+            selectedSpawn.longitude
     });
 }
 
 
 function joinRoom() {
 
-    if (!connected) {
-
-        multiplayerMessage(
-            "Serveur non connecté."
-        );
-
-        reconnectServer();
-
-        return;
-    }
-
     const code =
-        $("roomCodeInput")?.value
+        $("roomCodeInput")
+            .value
             .trim()
-            .toUpperCase() ||
-        "";
+            .toUpperCase();
 
     const password =
-        $("roomPasswordInput")?.value ||
-        "";
+        $("roomPasswordInput")
+            .value;
 
     if (code.length !== 6) {
 
@@ -1042,9 +1266,12 @@ function joinRoom() {
     }
 
     send({
-        type: "join_room",
 
-        room: code,
+        type:
+            "join_room",
+
+        room:
+            code,
 
         password,
 
@@ -1052,10 +1279,10 @@ function joinRoom() {
             selectedVehicle,
 
         latitude:
-            spawnLocation.latitude,
+            selectedSpawn.latitude,
 
         longitude:
-            spawnLocation.longitude
+            selectedSpawn.longitude
     });
 }
 
@@ -1065,10 +1292,8 @@ function quickMatch() {
     if (!connected) {
 
         multiplayerMessage(
-            "Connexion au serveur..."
+            "Serveur non connecté."
         );
-
-        reconnectServer();
 
         return;
     }
@@ -1078,16 +1303,18 @@ function quickMatch() {
     );
 
     send({
-        type: "quick_match",
+
+        type:
+            "quick_match",
 
         vehicle:
             selectedVehicle,
 
         latitude:
-            spawnLocation.latitude,
+            selectedSpawn.latitude,
 
         longitude:
-            spawnLocation.longitude
+            selectedSpawn.longitude
     });
 }
 
@@ -1096,21 +1323,7 @@ function quickMatch() {
    ROOM
 ========================================================= */
 
-function fillPlayers(data) {
-
-    players = {};
-
-    if (!Array.isArray(data.players)) {
-        return;
-    }
-
-    data.players.forEach(player => {
-        players[player.id] = player;
-    });
-}
-
-
-function handleRoomCreated(data) {
+function handleRoom(data) {
 
     currentRoom =
         data.room;
@@ -1118,7 +1331,24 @@ function handleRoomCreated(data) {
     currentPlayerId =
         data.playerId;
 
-    fillPlayers(data);
+    players = {};
+
+    if (
+        Array.isArray(
+            data.players
+        )
+    ) {
+
+        data.players.forEach(
+            player => {
+
+                players[
+                    player.id
+                ] = player;
+
+            }
+        );
+    }
 
     hide("multiplayerScreen");
     hide("privateRoomScreen");
@@ -1134,63 +1364,15 @@ function handleRoomCreated(data) {
 }
 
 
-function handleRoomJoined(data) {
-
-    currentRoom =
-        data.room;
-
-    currentPlayerId =
-        data.playerId;
-
-    fillPlayers(data);
-
-    hide("multiplayerScreen");
-
-    show("roomScreen");
-
-    setText(
-        "currentRoomCode",
-        currentRoom
-    );
-
-    refreshPlayersList();
-}
-
-
-function handleQuickMatch(data) {
-
-    currentRoom =
-        data.room;
-
-    currentPlayerId =
-        data.playerId;
-
-    fillPlayers(data);
-
-    hide("multiplayerScreen");
-
-    show("roomScreen");
-
-    setText(
-        "currentRoomCode",
-        currentRoom
-    );
-
-    refreshPlayersList();
-
-    notify(
-        "⚡ Partie trouvée !"
-    );
-}
-
-
 /* =========================================================
    JOUEURS
 ========================================================= */
 
 function addPlayer(player) {
 
-    if (!player) return;
+    if (!player) {
+        return;
+    }
 
     players[player.id] =
         player;
@@ -1199,25 +1381,39 @@ function addPlayer(player) {
 
 function updateRemotePlayer(player) {
 
-    if (!player) return;
+    if (!player) {
+        return;
+    }
 
     players[player.id] =
         player;
 
     refreshPlayersList();
+
+    updatePlayerOnGameMap(
+        player
+    );
 }
 
 
 function updateRemoteVehicle(data) {
 
-    if (!players[data.playerId]) {
+    if (
+        !players[
+            data.playerId
+        ]
+    ) {
         return;
     }
 
-    players[data.playerId].vehicle =
+    players[
+        data.playerId
+    ].vehicle =
         data.vehicle;
 
-    players[data.playerId].inVehicle =
+    players[
+        data.playerId
+    ].inVehicle =
         data.inVehicle;
 
     refreshPlayersList();
@@ -1229,70 +1425,45 @@ function refreshPlayersList() {
     const list =
         $("playersList");
 
-    if (!list) return;
+    if (!list) {
+        return;
+    }
 
     list.innerHTML = "";
 
     Object.values(players)
-        .forEach(player => {
+        .forEach(
+            player => {
 
-            const div =
-                document.createElement(
-                    "div"
+                const div =
+                    document.createElement(
+                        "div"
+                    );
+
+                div.className =
+                    "playerItem";
+
+                const vehicle =
+                    player.inVehicle
+                        ? "🚗 " +
+                          player.vehicle
+                        : "🚶 À pied";
+
+                div.textContent =
+                    player.name +
+                    " — " +
+                    vehicle;
+
+                list.appendChild(
+                    div
                 );
-
-            div.className =
-                "playerItem";
-
-            const vehicle =
-                player.inVehicle
-                    ? "🚗 " +
-                      player.vehicle
-                    : "🚶 À pied";
-
-            div.textContent =
-                player.name +
-                " — " +
-                vehicle;
-
-            list.appendChild(div);
-        });
+            }
+        );
 }
 
 
 /* =========================================================
-   QUITTER ROOM
-========================================================= */
-
-function leaveRoom() {
-
-    currentRoom = null;
-    currentPlayerId = null;
-    players = {};
-
-    if (
-        socket &&
-        socket.readyState === WebSocket.OPEN
-    ) {
-        /*
-         * On ferme uniquement la partie client.
-         * Le serveur supprimera le joueur quand
-         * la connexion sera fermée.
-         */
-        socket.close();
-    }
-
-    setTimeout(() => {
-        connectServer();
-    }, 500);
-
-    hide("roomScreen");
-    show("mainMenu");
-}
-
-
-/* =========================================================
-   JEU
+   START GAME
 ========================================================= */
 
 function startGame() {
@@ -1305,11 +1476,168 @@ function startGame() {
 
     show("gameHud");
 
+    initializeGameMap();
+
     updateHUD();
 
     notify(
         "🚗 Bienvenue dans RoadGame !"
     );
+}
+
+
+/* =========================================================
+   GAME MAP
+========================================================= */
+
+function initializeGameMap() {
+
+    if (!window.L) {
+        return;
+    }
+
+    if (!gameMap) {
+
+        gameMap =
+            L.map(
+                "gameMap",
+                {
+                    zoomControl: false
+                }
+            );
+
+        L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+                maxZoom: 19,
+                attribution:
+                    "&copy; OpenStreetMap contributors"
+            }
+        ).addTo(gameMap);
+    }
+
+    setTimeout(() => {
+
+        gameMap.invalidateSize();
+
+        gameMap.setView(
+            [
+                selectedSpawn.latitude,
+                selectedSpawn.longitude
+            ],
+            mapZoom
+        );
+
+        updateLocalMarker();
+
+    }, 100);
+}
+
+
+/* =========================================================
+   MARQUEUR LOCAL
+========================================================= */
+
+function updateLocalMarker() {
+
+    if (!gameMap) {
+        return;
+    }
+
+    const position = [
+
+        selectedSpawn.latitude,
+
+        selectedSpawn.longitude
+
+    ];
+
+    if (playerMarker) {
+
+        playerMarker.setLatLng(
+            position
+        );
+
+    } else {
+
+        playerMarker =
+            L.marker(
+                position
+            ).addTo(gameMap);
+
+        playerMarker.bindPopup(
+            "📍 Toi"
+        );
+    }
+}
+
+
+/* =========================================================
+   MARQUEURS AUTRES JOUEURS
+========================================================= */
+
+const remoteMarkers = {};
+
+
+function updatePlayerOnGameMap(player) {
+
+    if (!gameMap) {
+        return;
+    }
+
+    if (
+        player.id ===
+        currentPlayerId
+    ) {
+        return;
+    }
+
+    if (
+        !Number.isFinite(
+            player.latitude
+        ) ||
+        !Number.isFinite(
+            player.longitude
+        )
+    ) {
+        return;
+    }
+
+    const position = [
+
+        player.latitude,
+
+        player.longitude
+
+    ];
+
+    if (
+        remoteMarkers[player.id]
+    ) {
+
+        remoteMarkers[
+            player.id
+        ].setLatLng(
+            position
+        );
+
+    } else {
+
+        const marker =
+            L.marker(
+                position
+            ).addTo(gameMap);
+
+        marker.bindPopup(
+            escapeHtml(
+                player.name
+            )
+        );
+
+        remoteMarkers[
+            player.id
+        ] = marker;
+    }
 }
 
 
@@ -1321,6 +1649,7 @@ function updateHUD() {
 
     setText(
         "hudPlayerName",
+
         currentUser
             ? currentUser.username
             : "Invité"
@@ -1328,35 +1657,37 @@ function updateHUD() {
 
     setText(
         "hudVehicle",
+
         selectedVehicle === "walk"
             ? "À pied"
-            : (
-                VEHICLE_NAMES[
-                    selectedVehicle
-                ] ||
-                selectedVehicle
-            )
-    );
-
-    setText(
-        "spawnLocationText",
-        spawnLocation.address
+            : selectedVehicle
     );
 }
 
 
 /* =========================================================
-   VÉHICULES
+   GARAGE
 ========================================================= */
 
 const VEHICLE_NAMES = {
 
-    walk: "🚶 À pied",
-    car: "🚗 Voiture",
-    truck: "🚚 Camion",
-    bus: "🚌 Bus",
-    plane: "✈️ Avion",
-    boat: "🚤 Bateau"
+    walk:
+        "🚶 À pied",
+
+    car:
+        "🚗 Voiture",
+
+    truck:
+        "🚚 Camion",
+
+    bus:
+        "🚌 Bus",
+
+    plane:
+        "✈️ Avion",
+
+    boat:
+        "🚤 Bateau"
 };
 
 
@@ -1365,61 +1696,70 @@ function renderGarage() {
     const container =
         $("garageVehicles");
 
-    if (!container) return;
+    if (!container) {
+        return;
+    }
 
     container.innerHTML = "";
 
     const vehicles =
-        currentUser?.vehicles ||
-        ["car"];
+        currentUser
+            ? currentUser.vehicles ||
+              ["car"]
+            : ["car"];
 
-    vehicles.forEach(vehicle => {
+    vehicles.forEach(
+        vehicle => {
 
-        const button =
-            document.createElement(
-                "button"
-            );
+            const button =
+                document.createElement(
+                    "button"
+                );
 
-        button.className =
-            "vehicleCard";
+            button.className =
+                "vehicleCard";
 
-        if (
-            vehicle === selectedVehicle
-        ) {
-            button.classList.add(
-                "selected"
-            );
-        }
+            if (
+                vehicle ===
+                selectedVehicle
+            ) {
 
-        button.textContent =
-            VEHICLE_NAMES[vehicle] ||
-            vehicle;
-
-        button.onclick = () => {
-
-            selectedVehicle =
-                vehicle;
-
-            if (currentUser) {
-                currentUser.selectedVehicle =
-                    vehicle;
+                button.classList.add(
+                    "selected"
+                );
             }
 
-            setText(
-                "selectedVehicleText",
-                "Véhicule sélectionné : " +
-                (
-                    VEHICLE_NAMES[vehicle] ||
+            button.textContent =
+                VEHICLE_NAMES[
                     vehicle
-                )
+                ] || vehicle;
+
+            button.onclick =
+                () => {
+
+                    selectedVehicle =
+                        vehicle;
+
+                    setText(
+                        "selectedVehicleText",
+
+                        "Véhicule sélectionné : " +
+                        (
+                            VEHICLE_NAMES[
+                                vehicle
+                            ] ||
+                            vehicle
+                        )
+                    );
+
+                    renderGarage();
+                };
+
+            container.appendChild(
+                button
             );
-
-            renderGarage();
-            updateHUD();
-        };
-
-        container.appendChild(button);
-    });
+        }
+    );
 }
 
 
@@ -1432,6 +1772,7 @@ function useVehicle() {
     );
 
     hide("garageScreen");
+
     show("mainMenu");
 }
 
@@ -1445,79 +1786,90 @@ function renderShop() {
     const container =
         $("shopVehicles");
 
-    if (!container) return;
+    if (!container) {
+        return;
+    }
 
     container.innerHTML = "";
 
     const owned =
-        currentUser?.vehicles ||
-        ["car"];
+        currentUser
+            ? currentUser.vehicles ||
+              ["car"]
+            : ["car"];
 
     [
         "truck",
         "bus",
         "plane",
         "boat"
-    ].forEach(vehicle => {
+    ].forEach(
+        vehicle => {
 
-        const div =
-            document.createElement(
-                "div"
-            );
-
-        div.className =
-            "vehicleCard";
-
-        const title =
-            document.createElement(
-                "div"
-            );
-
-        title.textContent =
-            VEHICLE_NAMES[vehicle];
-
-        div.appendChild(title);
-
-        if (owned.includes(vehicle)) {
-
-            const text =
+            const div =
                 document.createElement(
-                    "p"
+                    "div"
                 );
 
-            text.textContent =
-                "✅ Possédé";
+            div.className =
+                "vehicleCard";
 
-            div.appendChild(text);
-
-        } else {
-
-            const button =
-                document.createElement(
-                    "button"
-                );
-
-            button.className =
-                "primaryButton";
-
-            button.textContent =
-                "Acheter";
-
-            button.onclick = () => {
-
-                send({
-                    type:
-                        "buy_vehicle",
-
+            div.textContent =
+                VEHICLE_NAMES[
                     vehicle
-                });
-            };
+                ];
 
-            div.appendChild(button);
+            if (
+                owned.includes(
+                    vehicle
+                )
+            ) {
+
+                const p =
+                    document.createElement(
+                        "p"
+                    );
+
+                p.textContent =
+                    "✅ Possédé";
+
+                div.appendChild(p);
+
+            } else {
+
+                const button =
+                    document.createElement(
+                        "button"
+                    );
+
+                button.className =
+                    "button primary";
+
+                button.textContent =
+                    "Acheter";
+
+                button.onclick =
+                    () => {
+
+                        send({
+                            type:
+                                "buy_vehicle",
+
+                            vehicle
+                        });
+
+                    };
+
+                div.appendChild(
+                    button
+                );
+            }
+
+            container.appendChild(
+                div
+            );
         }
-
-        container.appendChild(div);
-    });
+    );
 }
 
 
@@ -1527,10 +1879,15 @@ function renderShop() {
 
 function sendFriendRequest() {
 
+    const input =
+        $("friendUsernameInput");
+
+    if (!input) {
+        return;
+    }
+
     const username =
-        $("friendUsernameInput")?.value
-            .trim() ||
-        "";
+        input.value.trim();
 
     if (!username) {
 
@@ -1542,6 +1899,7 @@ function sendFriendRequest() {
     }
 
     send({
+
         type:
             "friend_request",
 
@@ -1552,24 +1910,26 @@ function sendFriendRequest() {
 
 function renderFriends() {
 
-    if (!currentUser) return;
-
-    const requests =
+    const requestList =
         $("friendRequestsList");
 
-    const friends =
+    const friendList =
         $("friendsList");
 
-    if (requests) {
-
-        requests.innerHTML =
-            "<p class='emptyText'>Aucune demande.</p>";
+    if (!currentUser) {
+        return;
     }
 
-    if (friends) {
+    if (requestList) {
 
-        friends.innerHTML =
-            "<p class='emptyText'>Tu n'as pas encore d'amis.</p>";
+        requestList.innerHTML =
+            "<p>Aucune demande.</p>";
+    }
+
+    if (friendList) {
+
+        friendList.innerHTML =
+            "<p>Tu n'as pas encore d'amis.</p>";
     }
 }
 
@@ -1580,7 +1940,9 @@ function renderFriends() {
 
 function saveSettings() {
 
-    if (!currentUser) return;
+    if (!currentUser) {
+        return;
+    }
 
     const sound =
         $("soundToggle")
@@ -1593,41 +1955,46 @@ function saveSettings() {
             : true;
 
     currentUser.settings = {
+
         sound,
+
         music
     };
 
     send({
+
         type:
             "settings_update",
 
         sound,
+
         music
     });
 }
 
 
 /* =========================================================
-   PSEUDO
+   CHANGER PSEUDO
 ========================================================= */
 
 function changeUsername() {
 
     const username =
-        $("newUsernameInput")?.value
-            .trim() ||
-        "";
+        $("newUsernameInput")
+            .value
+            .trim();
 
     if (username.length < 3) {
 
         usernameMessage(
-            "Le pseudo doit contenir au moins 3 caractères."
+            "Pseudo trop court."
         );
 
         return;
     }
 
     send({
+
         type:
             "change_username",
 
@@ -1637,15 +2004,83 @@ function changeUsername() {
 
 
 /* =========================================================
-   DÉCONNEXION
+   ENTRER / SORTIR VÉHICULE
+========================================================= */
+
+function enterVehicle() {
+
+    if (
+        selectedVehicle ===
+        "walk"
+    ) {
+
+        selectedVehicle =
+            "car";
+    }
+
+    send({
+
+        type:
+            "enter_vehicle",
+
+        vehicle:
+            selectedVehicle
+    });
+
+    updateHUD();
+}
+
+
+function exitVehicle() {
+
+    selectedVehicle =
+        "walk";
+
+    send({
+        type:
+            "exit_vehicle"
+    });
+
+    updateHUD();
+}
+
+
+/* =========================================================
+   QUITTER ROOM
+========================================================= */
+
+function leaveRoom() {
+
+    currentRoom = null;
+
+    currentPlayerId = null;
+
+    players = {};
+
+    hide("roomScreen");
+
+    show("mainMenu");
+
+    /*
+       On ne ferme PAS le WebSocket.
+       Cela évite de devoir attendre
+       le redémarrage du serveur.
+    */
+}
+
+
+/* =========================================================
+   LOGOUT
 ========================================================= */
 
 function logout() {
 
     currentUser = null;
+
     loggedIn = false;
 
     currentRoom = null;
+
     currentPlayerId = null;
 
     players = {};
@@ -1653,8 +2088,8 @@ function logout() {
     gameStarted = false;
 
     hide("mainMenu");
+
     hide("gameHud");
-    hide("settingsScreen");
 
     show("authScreen");
 
@@ -1668,406 +2103,6 @@ function logout() {
 
     authMessage(
         "Tu es déconnecté."
-    );
-}
-
-
-/* =========================================================
-   OPENSTREETMAP
-========================================================= */
-
-async function searchAddress() {
-
-    const input =
-        getSpawnInput();
-
-    if (!input) {
-
-        notify(
-            "Ajoute une barre d'adresse dans ton interface."
-        );
-
-        return;
-    }
-
-    const query =
-        input.value.trim();
-
-    if (!query) {
-
-        notify(
-            "Écris une ville ou une adresse."
-        );
-
-        return;
-    }
-
-    setSpawnMessage(
-        "🔎 Recherche de l'adresse..."
-    );
-
-    try {
-
-        const url =
-            "https://nominatim.openstreetmap.org/search" +
-            "?format=json" +
-            "&limit=1" +
-            "&q=" +
-            encodeURIComponent(query);
-
-        const response =
-            await fetch(url, {
-                headers: {
-                    "Accept":
-                        "application/json"
-                }
-            });
-
-        if (!response.ok) {
-            throw new Error(
-                "OpenStreetMap HTTP " +
-                response.status
-            );
-        }
-
-        const results =
-            await response.json();
-
-        if (
-            !Array.isArray(results) ||
-            results.length === 0
-        ) {
-
-            setSpawnMessage(
-                "❌ Adresse introuvable."
-            );
-
-            return;
-        }
-
-        const result =
-            results[0];
-
-        spawnLocation = {
-
-            latitude:
-                Number(result.lat),
-
-            longitude:
-                Number(result.lon),
-
-            address:
-                result.display_name ||
-                query
-        };
-
-        setSpawnMessage(
-            "📍 Spawn : " +
-            spawnLocation.address
-        );
-
-        notify(
-            "📍 Emplacement sélectionné !"
-        );
-
-        updateHUD();
-
-        drawMap();
-
-    } catch (error) {
-
-        console.error(
-            "OpenStreetMap :",
-            error
-        );
-
-        setSpawnMessage(
-            "❌ Impossible de rechercher cette adresse."
-        );
-    }
-}
-
-
-function getSpawnInput() {
-
-    return (
-        $("spawnAddressInput") ||
-        $("addressInput") ||
-        $("cityInput") ||
-        $("spawnInput") ||
-        $("locationInput")
-    );
-}
-
-
-function setSpawnMessage(message) {
-
-    const ids = [
-        "spawnMessage",
-        "addressMessage",
-        "locationMessage",
-        "spawnResult"
-    ];
-
-    for (const id of ids) {
-
-        const el = $(id);
-
-        if (el) {
-            el.textContent = message;
-            return;
-        }
-    }
-
-    notify(message);
-}
-
-
-/* =========================================================
-   CARTE
-========================================================= */
-
-function openMap() {
-
-    show("mapScreen");
-
-    drawMap();
-}
-
-
-function closeMap() {
-
-    hide("mapScreen");
-}
-
-
-function drawMap() {
-
-    const canvas =
-        $("mapCanvas");
-
-    if (!canvas) return;
-
-    const ctx =
-        canvas.getContext("2d");
-
-    canvas.width =
-        window.innerWidth;
-
-    canvas.height =
-        window.innerHeight;
-
-    ctx.clearRect(
-        0,
-        0,
-        canvas.width,
-        canvas.height
-    );
-
-    ctx.save();
-
-    ctx.translate(
-        canvas.width / 2,
-        canvas.height / 2
-    );
-
-    ctx.scale(
-        mapZoom,
-        mapZoom
-    );
-
-    /*
-     * Carte simplifiée.
-     * Le vrai emplacement GPS est conservé
-     * dans spawnLocation.
-     */
-
-    ctx.strokeStyle =
-        "#555";
-
-    ctx.lineWidth = 20;
-
-    for (
-        let x = -1000;
-        x <= 1000;
-        x += 200
-    ) {
-
-        ctx.beginPath();
-
-        ctx.moveTo(x, -1000);
-        ctx.lineTo(x, 1000);
-
-        ctx.stroke();
-    }
-
-    for (
-        let y = -1000;
-        y <= 1000;
-        y += 200
-    ) {
-
-        ctx.beginPath();
-
-        ctx.moveTo(-1000, y);
-        ctx.lineTo(1000, y);
-
-        ctx.stroke();
-    }
-
-    /*
-     * Position du spawn
-     */
-
-    ctx.fillStyle =
-        "#ff3333";
-
-    ctx.beginPath();
-
-    ctx.arc(
-        0,
-        0,
-        14,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.restore();
-}
-
-
-function zoomMap(amount) {
-
-    mapZoom += amount;
-
-    mapZoom =
-        Math.max(
-            0.5,
-            Math.min(
-                5,
-                mapZoom
-            )
-        );
-
-    drawMap();
-}
-
-
-/* =========================================================
-   ZOOM TACTILE
-========================================================= */
-
-function setupMapTouch() {
-
-    const canvas =
-        $("mapCanvas");
-
-    if (!canvas) return;
-
-    let startDistance = null;
-
-    canvas.addEventListener(
-        "touchstart",
-        event => {
-
-            if (
-                event.touches.length === 2
-            ) {
-
-                const a =
-                    event.touches[0];
-
-                const b =
-                    event.touches[1];
-
-                startDistance =
-                    Math.hypot(
-                        a.clientX -
-                        b.clientX,
-
-                        a.clientY -
-                        b.clientY
-                    );
-            }
-
-        },
-        {
-            passive: true
-        }
-    );
-
-
-    canvas.addEventListener(
-        "touchmove",
-        event => {
-
-            if (
-                event.touches.length !== 2 ||
-                startDistance === null
-            ) {
-                return;
-            }
-
-            const a =
-                event.touches[0];
-
-            const b =
-                event.touches[1];
-
-            const distance =
-                Math.hypot(
-                    a.clientX -
-                    b.clientX,
-
-                    a.clientY -
-                    b.clientY
-                );
-
-            const difference =
-                distance -
-                startDistance;
-
-            if (
-                Math.abs(difference) > 5
-            ) {
-
-                mapZoom +=
-                    difference > 0
-                        ? 0.06
-                        : -0.06;
-
-                mapZoom =
-                    Math.max(
-                        0.5,
-                        Math.min(
-                            5,
-                            mapZoom
-                        )
-                    );
-
-                startDistance =
-                    distance;
-
-                drawMap();
-            }
-
-        },
-        {
-            passive: true
-        }
-    );
-
-
-    canvas.addEventListener(
-        "touchend",
-        () => {
-            startDistance = null;
-        },
-        {
-            passive: true
-        }
     );
 }
 
@@ -2096,40 +2131,81 @@ function exitGame() {
 
 
 /* =========================================================
-   VÉHICULE
+   CARTE
 ========================================================= */
 
-function enterVehicle() {
+function openMap() {
 
-    if (
-        selectedVehicle === "walk"
-    ) {
-        selectedVehicle = "car";
+    hide("gameHud");
+
+    show("mapScreen");
+
+    if (!gameMap) {
+
+        initializeGameMap();
+
+    } else {
+
+        setTimeout(() => {
+
+            gameMap.invalidateSize();
+
+            gameMap.setView(
+                [
+                    selectedSpawn.latitude,
+                    selectedSpawn.longitude
+                ],
+                mapZoom
+            );
+
+        }, 100);
     }
-
-    send({
-        type:
-            "enter_vehicle",
-
-        vehicle:
-            selectedVehicle
-    });
-
-    updateHUD();
 }
 
 
-function exitVehicle() {
+function closeMap() {
 
-    selectedVehicle =
-        "walk";
+    hide("mapScreen");
 
-    send({
-        type:
-            "exit_vehicle"
-    });
+    show("gameHud");
+}
 
-    updateHUD();
+
+function zoomMap(amount) {
+
+    mapZoom += amount;
+
+    mapZoom =
+        Math.max(
+            3,
+            Math.min(
+                19,
+                mapZoom
+            )
+        );
+
+    if (gameMap) {
+
+        gameMap.setZoom(
+            mapZoom
+        );
+    }
+}
+
+
+function centerMap() {
+
+    if (!gameMap) {
+        return;
+    }
+
+    gameMap.setView(
+        [
+            selectedSpawn.latitude,
+            selectedSpawn.longitude
+        ],
+        mapZoom
+    );
 }
 
 
@@ -2151,7 +2227,10 @@ function setupJoystick() {
 
     let active = false;
 
-    function move(x, y) {
+    function move(
+        clientX,
+        clientY
+    ) {
 
         const rect =
             joystick.getBoundingClientRect();
@@ -2165,24 +2244,35 @@ function setupJoystick() {
             rect.height / 2;
 
         let dx =
-            x - centerX;
+            clientX -
+            centerX;
 
         let dy =
-            y - centerY;
+            clientY -
+            centerY;
 
         const max =
             rect.width / 2;
 
         const distance =
-            Math.hypot(dx, dy);
+            Math.sqrt(
+                dx * dx +
+                dy * dy
+            );
 
-        if (distance > max) {
+        if (
+            distance > max
+        ) {
 
             dx =
-                dx / distance * max;
+                dx /
+                distance *
+                max;
 
             dy =
-                dy / distance * max;
+                dy /
+                distance *
+                max;
         }
 
         stick.style.transform =
@@ -2194,7 +2284,7 @@ function setupJoystick() {
         active = false;
 
         stick.style.transform =
-            "translate(0,0)";
+            "translate(0, 0)";
     }
 
     joystick.addEventListener(
@@ -2203,11 +2293,9 @@ function setupJoystick() {
 
             active = true;
 
-            try {
-                joystick.setPointerCapture(
-                    event.pointerId
-                );
-            } catch {}
+            joystick.setPointerCapture(
+                event.pointerId
+            );
 
             move(
                 event.clientX,
@@ -2220,7 +2308,9 @@ function setupJoystick() {
         "pointermove",
         event => {
 
-            if (!active) return;
+            if (!active) {
+                return;
+            }
 
             move(
                 event.clientX,
@@ -2247,22 +2337,23 @@ function setupJoystick() {
 
 function setupDriveControls() {
 
-    const ids = [
+    [
         "accelerateButton",
         "brakeButton",
         "leftButton",
         "rightButton"
-    ];
-
-    ids.forEach(id => {
+    ].forEach(id => {
 
         const button = $(id);
 
-        if (!button) return;
+        if (!button) {
+            return;
+        }
 
         button.addEventListener(
             "pointerdown",
             () => {
+
                 button.classList.add(
                     "active"
                 );
@@ -2272,6 +2363,7 @@ function setupDriveControls() {
         button.addEventListener(
             "pointerup",
             () => {
+
                 button.classList.remove(
                     "active"
                 );
@@ -2281,12 +2373,109 @@ function setupDriveControls() {
         button.addEventListener(
             "pointercancel",
             () => {
+
                 button.classList.remove(
                     "active"
                 );
             }
         );
     });
+}
+
+
+/* =========================================================
+   LOADING
+========================================================= */
+
+function setLoadingProgress(value) {
+
+    loadingProgress =
+        Math.max(
+            0,
+            Math.min(
+                100,
+                value
+            )
+        );
+
+    const text =
+        $("loadingText");
+
+    const bar =
+        $("loadingBarFill");
+
+    if (text) {
+
+        text.textContent =
+            "Chargement... " +
+            Math.round(
+                loadingProgress
+            ) +
+            "%";
+    }
+
+    if (bar) {
+
+        bar.style.width =
+            loadingProgress +
+            "%";
+    }
+}
+
+
+function setLoadingText(text) {
+
+    const element =
+        $("loadingText");
+
+    if (element) {
+        element.textContent =
+            text;
+    }
+}
+
+
+/* =========================================================
+   CHARGEMENT
+========================================================= */
+
+function loadingAnimation() {
+
+    let progress = 0;
+
+    const interval =
+        setInterval(() => {
+
+            if (connected) {
+
+                clearInterval(
+                    interval
+                );
+
+                return;
+            }
+
+            progress +=
+                Math.random() * 10;
+
+            /*
+               On ne bloque plus à 90%.
+               Le maximum d'attente est 80%.
+               Le WebSocket décide quand
+               passer à 100%.
+            */
+
+            progress =
+                Math.min(
+                    80,
+                    progress
+                );
+
+            setLoadingProgress(
+                progress
+            );
+
+        }, 180);
 }
 
 
@@ -2311,22 +2500,12 @@ function setupScreens() {
 
                     hide(id);
 
-                    if (
-                        id === "multiplayerScreen" ||
-                        id === "friendsScreen" ||
-                        id === "garageScreen" ||
-                        id === "shopScreen" ||
-                        id === "settingsScreen"
-                    ) {
-                        show("mainMenu");
-                    }
-
-                    if (
-                        id === "usernameScreen"
-                    ) {
-                        show("settingsScreen");
-                    }
-
+                    show(
+                        id ===
+                        "settingsScreen"
+                            ? "mainMenu"
+                            : "mainMenu"
+                    );
                 }
             );
         });
@@ -2334,7 +2513,7 @@ function setupScreens() {
 
 
 /* =========================================================
-   ÉVÉNEMENTS
+   EVENTS
 ========================================================= */
 
 function setupEvents() {
@@ -2365,7 +2544,7 @@ function setupEvents() {
     $("playButton")
         ?.addEventListener(
             "click",
-            startGame
+            openSpawnScreen
         );
 
     $("multiplayerButton")
@@ -2378,8 +2557,9 @@ function setupEvents() {
         ?.addEventListener(
             "click",
             () => {
-                openMultiplayer();
-                quickMatch();
+
+                openSpawnScreen();
+
             }
         );
 
@@ -2390,6 +2570,7 @@ function setupEvents() {
             () => {
 
                 hide("mainMenu");
+
                 show("garageScreen");
 
                 renderGarage();
@@ -2403,6 +2584,7 @@ function setupEvents() {
             () => {
 
                 hide("mainMenu");
+
                 show("shopScreen");
 
                 renderShop();
@@ -2416,6 +2598,7 @@ function setupEvents() {
             () => {
 
                 hide("mainMenu");
+
                 show("friendsScreen");
 
                 renderFriends();
@@ -2429,7 +2612,39 @@ function setupEvents() {
             () => {
 
                 hide("mainMenu");
+
                 show("settingsScreen");
+            }
+        );
+
+
+    /* SPAWN */
+
+    $("searchAddressButton")
+        ?.addEventListener(
+            "click",
+            searchAddress
+        );
+
+    $("spawnHereButton")
+        ?.addEventListener(
+            "click",
+            spawnHere
+        );
+
+
+    $("addressInput")
+        ?.addEventListener(
+            "keydown",
+            event => {
+
+                if (
+                    event.key ===
+                    "Enter"
+                ) {
+
+                    searchAddress();
+                }
             }
         );
 
@@ -2438,7 +2653,6 @@ function setupEvents() {
 
     $("quickMatchButton2")
         ?.addEventListener(
-            "click",
             quickMatch
         );
 
@@ -2521,6 +2735,7 @@ function setupEvents() {
             () => {
 
                 hide("settingsScreen");
+
                 show("usernameScreen");
             }
         );
@@ -2540,7 +2755,7 @@ function setupEvents() {
         );
 
 
-    /* CARTE */
+    /* GAME */
 
     $("mapButton")
         ?.addEventListener(
@@ -2554,57 +2769,24 @@ function setupEvents() {
             closeMap
         );
 
+    $("mapCenterButton")
+        ?.addEventListener(
+            "click",
+            centerMap
+        );
+
     $("mapZoomIn")
         ?.addEventListener(
             "click",
-            () => zoomMap(0.25)
+            () => zoomMap(1)
         );
 
     $("mapZoomOut")
         ?.addEventListener(
             "click",
-            () => zoomMap(-0.25)
+            () => zoomMap(-1)
         );
 
-
-    /* OPENSTREETMAP */
-
-    const addressButtons = [
-        "searchAddressButton",
-        "searchSpawnButton",
-        "findAddressButton",
-        "spawnSearchButton"
-    ];
-
-    addressButtons.forEach(id => {
-
-        $(id)?.addEventListener(
-            "click",
-            searchAddress
-        );
-    });
-
-
-    const spawnInput =
-        getSpawnInput();
-
-    spawnInput?.addEventListener(
-        "keydown",
-        event => {
-
-            if (
-                event.key === "Enter"
-            ) {
-
-                event.preventDefault();
-
-                searchAddress();
-            }
-        }
-    );
-
-
-    /* PAUSE */
 
     $("menuGameButton")
         ?.addEventListener(
@@ -2618,14 +2800,23 @@ function setupEvents() {
             resumeGame
         );
 
+    $("pauseSettingsButton")
+        ?.addEventListener(
+            "click",
+            () => {
+
+                hide("pauseScreen");
+
+                show("settingsScreen");
+            }
+        );
+
     $("exitGameButton")
         ?.addEventListener(
             "click",
             exitGame
         );
 
-
-    /* VÉHICULE */
 
     $("enterVehicleButton")
         ?.addEventListener(
@@ -2642,76 +2833,13 @@ function setupEvents() {
 
 
 /* =========================================================
-   CLAVIER
-========================================================= */
-
-document.addEventListener(
-    "keydown",
-    event => {
-
-        if (
-            event.key === "Enter" &&
-            $("authScreen") &&
-            !$("authScreen")
-                .classList
-                .contains("hidden")
-        ) {
-
-            loginAccount();
-        }
-
-        if (
-            event.key === "Escape"
-        ) {
-
-            if (
-                $("mapScreen") &&
-                !$("mapScreen")
-                    .classList
-                    .contains("hidden")
-            ) {
-
-                closeMap();
-                return;
-            }
-
-            if (gameStarted) {
-                openPause();
-            }
-        }
-    }
-);
-
-
-/* =========================================================
-   REDIMENSIONNEMENT CARTE
-========================================================= */
-
-window.addEventListener(
-    "resize",
-    () => {
-
-        if (
-            $("mapScreen") &&
-            !$("mapScreen")
-                .classList
-                .contains("hidden")
-        ) {
-
-            drawMap();
-        }
-    }
-);
-
-
-/* =========================================================
    INITIALISATION
 ========================================================= */
 
 function init() {
 
     console.log(
-        "🚗 RoadGame V4 démarrage..."
+        "🚗 RoadGame V4"
     );
 
     console.log(
@@ -2724,9 +2852,10 @@ function init() {
     hide("multiplayerScreen");
     hide("privateRoomScreen");
     hide("roomScreen");
-    hide("friendsScreen");
+    hide("spawnScreen");
     hide("garageScreen");
     hide("shopScreen");
+    hide("friendsScreen");
     hide("settingsScreen");
     hide("usernameScreen");
     hide("gameHud");
@@ -2742,19 +2871,24 @@ function init() {
     );
 
     setupEvents();
+
     setupScreens();
+
     setupJoystick();
+
     setupDriveControls();
-    setupMapTouch();
 
     loadingAnimation();
 
     /*
-     * On démarre rapidement la connexion.
-     */
+       Connexion rapide au serveur.
+       OpenStreetMap n'est PAS chargé ici.
+       Cela évite que le chargement reste bloqué.
+    */
+
     setTimeout(() => {
 
-        setLoadingProgress(30);
+        setLoadingProgress(25);
 
         setLoadingText(
             "Connexion au serveur..."
@@ -2762,8 +2896,84 @@ function init() {
 
         connectServer();
 
-    }, 300);
+    }, 250);
 }
+
+
+/* =========================================================
+   UTILITAIRE
+========================================================= */
+
+function escapeHtml(value) {
+
+    return String(value)
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+}
+
+
+/* =========================================================
+   CLAVIER
+========================================================= */
+
+document.addEventListener(
+    "keydown",
+    event => {
+
+        if (
+            event.key ===
+            "Enter" &&
+            $("authScreen") &&
+            !$("authScreen")
+                .classList
+                .contains("hidden")
+        ) {
+
+            loginAccount();
+        }
+
+        if (
+            event.key ===
+            "Escape"
+        ) {
+
+            if (
+                $("mapScreen") &&
+                !$("mapScreen")
+                    .classList
+                    .contains("hidden")
+            ) {
+
+                closeMap();
+
+                return;
+            }
+
+            if (gameStarted) {
+
+                openPause();
+            }
+        }
+    }
+);
 
 
 /* =========================================================
