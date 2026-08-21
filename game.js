@@ -1,473 +1,235 @@
-// ============================================================
-// ROADGAME - GAME.JS
-// Carte satellite + monde 3D + bâtiments réalistes
-// Collisions + photos + joystick + caméra + mini-map
-// Multijoueur + zoom tactile
-// ============================================================
+/* =========================================================
+   ROADGAME - GAME.JS V2
+   =========================================================
 
-const NOMINATIM =
-    "https://nominatim.openstreetmap.org/search";
+   Comprend :
+   - Connexion / création de compte
+   - Sauvegarde serveur
+   - Amis / demandes d'amis
+   - Partie rapide
+   - Parties publiques
+   - Serveurs privés avec mot de passe
+   - Multijoueur
+   - Synchronisation des joueurs
+   - Véhicules
+   - Entrer / sortir du véhicule
+   - Garage
+   - Magasin
+   - Paramètres
+   - Carte simple
+   - Contrôles tactiles
+   - Three.js
+   ========================================================= */
 
-const OVERPASS =
-    "https://overpass-api.de/api/interpreter";
 
-const WIKIMEDIA_API =
-    "https://commons.wikimedia.org/w/api.php";
+// =========================================================
+// CONFIGURATION
+// =========================================================
 
-const SATELLITE_URL =
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile";
+// Serveur RoadGame
+const SERVER_URL =
+    window.location.protocol === "https:"
+        ? "wss://roadgame-server.onrender.com"
+        : "ws://localhost:10000";
 
 
-// ============================================================
+// Three.js sera chargé automatiquement
+let THREE = null;
+
+
+// =========================================================
+// ÉTAT GLOBAL
+// =========================================================
+
+let socket = null;
+
+let connected = false;
+
+let currentUser = null;
+
+let currentRoom = null;
+
+let currentPlayerId = null;
+
+let isPlaying = false;
+
+let isPaused = false;
+
+
+// =========================================================
 // THREE.JS
-// ============================================================
+// =========================================================
 
-let scene;
-let camera;
-let renderer;
-let player;
+let scene = null;
+let camera = null;
+let renderer = null;
+
+let clock = null;
+
+let localPlayer = null;
+
+const remotePlayers = new Map();
 
 
-// ============================================================
+// =========================================================
 // POSITION
-// ============================================================
+// =========================================================
 
-let centerLat = 0;
-let centerLon = 0;
+let playerPosition = {
+    x: 0,
+    z: 0
+};
 
-let worldData = [];
+let playerRotation = 0;
 
-let gameStarted = false;
 
-let cameraAngle = 0;
+// =========================================================
+// VÉHICULE
+// =========================================================
 
-let speed = 0.55;
+const VEHICLES = {
 
-let moveX = 0;
-let moveY = 0;
+    walk: {
+        name: "À pied",
+        icon: "🚶"
+    },
+
+    car: {
+        name: "Voiture",
+        icon: "🚗"
+    },
+
+    truck: {
+        name: "Camion",
+        icon: "🚚"
+    },
+
+    bus: {
+        name: "Bus",
+        icon: "🚌"
+    },
+
+    plane: {
+        name: "Avion",
+        icon: "✈️"
+    },
+
+    boat: {
+        name: "Bateau",
+        icon: "🚤"
+    }
+
+};
+
+let selectedVehicle = "car";
+
+let currentVehicle = "car";
+
+let inVehicle = true;
+
+
+// =========================================================
+// CONTRÔLES
+// =========================================================
+
+const controls = {
+
+    forward: false,
+    backward: false,
+    left: false,
+    right: false
+
+};
+
 
 let joystickActive = false;
 
-let lastTouchX = null;
+let joystickTouchId = null;
 
-let multiplayerSocket = null;
+let joystickX = 0;
 
+let joystickY = 0;
 
-// ============================================================
-// COLLISIONS
-// ============================================================
 
-let collisionBuildings = [];
+// =========================================================
+// INITIALISATION
+// =========================================================
 
-const PLAYER_RADIUS = 1.45;
+document.addEventListener(
+    "DOMContentLoaded",
+    async () => {
 
+        setupButtons();
 
-// ============================================================
-// CARTE
-// ============================================================
+        setupTouchControls();
 
-let mapZoom = 0.055;
+        setupKeyboard();
 
-let mapOffsetX = 0;
-let mapOffsetY = 0;
+        connectWebSocket();
 
-let mapDragging = false;
-
-let mapPinching = false;
-
-let mapLastX = 0;
-let mapLastY = 0;
-
-let mapStartDistance = 0;
-
-let mapStartZoom = 0;
-
-
-// ============================================================
-// PHOTO DE BÂTIMENT
-// ============================================================
-
-let nearbyBuilding = null;
-
-let photoSearchTimer = null;
-
-let photoRequestRunning = false;
-
-
-// ============================================================
-// ELEMENTS HTML
-// ============================================================
-
-const game =
-    document.getElementById("game");
-
-const menu =
-    document.getElementById("menu");
-
-const locationInput =
-    document.getElementById("location");
-
-const play =
-    document.getElementById("play");
-
-const message =
-    document.getElementById("message");
-
-const loading =
-    document.getElementById("loading");
-
-const loadingText =
-    document.getElementById("loadingText");
-
-const hud =
-    document.getElementById("hud");
-
-const locationName =
-    document.getElementById("locationName");
-
-const joystick =
-    document.getElementById("joystick");
-
-const stick =
-    document.getElementById("stick");
-
-const miniMap =
-    document.getElementById("miniMap");
-
-const miniCanvas =
-    document.getElementById("miniMapCanvas");
-
-const fullMap =
-    document.getElementById("fullscreenMap");
-
-const fullCanvas =
-    document.getElementById("fullMapCanvas");
-
-const multi =
-    document.getElementById("multiplayer");
-
-
-// ============================================================
-// LANCER LA PARTIE
-// ============================================================
-
-play.addEventListener(
-    "click",
-    startGame
-);
-
-
-locationInput.addEventListener(
-    "keydown",
-    event => {
-
-        if (event.key === "Enter") {
-            startGame();
-        }
-
-    }
-);
-
-
-async function startGame() {
-
-    const query =
-        locationInput.value.trim();
-
-
-    if (!query) {
-
-        message.textContent =
-            "❌ Écris une ville ou une adresse.";
-
-        return;
-    }
-
-
-    loading.style.display =
-        "flex";
-
-
-    try {
-
-        loadingText.textContent =
-            "📍 Recherche de " + query;
-
-
-        const place =
-            await geocode(query);
-
-
-        if (!place) {
-
-            throw new Error(
-                "Ville ou adresse introuvable."
-            );
-        }
-
-
-        centerLat =
-            Number(place.lat);
-
-        centerLon =
-            Number(place.lon);
-
-
-        loadingText.textContent =
-            "🛰️ Préparation de la carte satellite...";
-
-
-        const data =
-            await getOSMData(
-                centerLat,
-                centerLon
-            );
-
-
-        worldData =
-            data;
-
-
-        loadingText.textContent =
-            "🏙️ Construction de la ville 3D...";
-
+        await loadThreeJS();
 
         initThree();
 
+        showAuthScreen();
 
-        buildWorld(
-            data
+    }
+);
+
+
+// =========================================================
+// CHARGER THREE.JS
+// =========================================================
+
+async function loadThreeJS() {
+
+    if (window.THREE) {
+
+        THREE = window.THREE;
+
+        return;
+
+    }
+
+    try {
+
+        THREE = await import(
+            "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
         );
-
-
-        createPlayer();
-
-
-        menu.style.display =
-            "none";
-
-
-        hud.style.display =
-            "block";
-
-
-        joystick.style.display =
-            "block";
-
-
-        const cameraButtons =
-            document.getElementById(
-                "cameraButtons"
-            );
-
-        if (cameraButtons) {
-
-            cameraButtons.style.display =
-                "block";
-        }
-
-
-        const vehiclePanel =
-            document.getElementById(
-                "vehiclePanel"
-            );
-
-        if (vehiclePanel) {
-
-            vehiclePanel.style.display =
-                "block";
-        }
-
-
-        locationName.textContent =
-            "📍 " +
-            (
-                place.display_name ||
-                query
-            );
-
-
-        gameStarted =
-            true;
-
-
-        mapZoom =
-            0.055;
-
-        mapOffsetX =
-            0;
-
-        mapOffsetY =
-            0;
-
-
-        resizeMaps();
-
-        drawMiniMap();
-
-        updateCamera();
-
-        animate();
-
 
     } catch (error) {
 
-        console.error(error);
-
-
-        message.textContent =
-            "❌ " +
-            error.message;
-
-
-        alert(
-            "Impossible de générer cette map.\n\n" +
-            error.message
+        console.error(
+            "Impossible de charger Three.js",
+            error
         );
 
-
-    } finally {
-
-        loading.style.display =
-            "none";
     }
+
 }
 
 
-// ============================================================
-// GEOCODAGE
-// ============================================================
-
-async function geocode(query) {
-
-    const url =
-        NOMINATIM +
-        "?format=jsonv2" +
-        "&limit=1" +
-        "&q=" +
-        encodeURIComponent(query);
-
-
-    const response =
-        await fetch(
-            url,
-            {
-                headers: {
-                    "Accept":
-                        "application/json"
-                }
-            }
-        );
-
-
-    if (!response.ok) {
-
-        throw new Error(
-            "Le service de localisation ne répond pas."
-        );
-    }
-
-
-    const results =
-        await response.json();
-
-
-    if (
-        !results ||
-        results.length === 0
-    ) {
-
-        return null;
-    }
-
-
-    return results[0];
-}
-
-
-// ============================================================
-// OPENSTREETMAP
-// ============================================================
-
-async function getOSMData(
-    lat,
-    lon
-) {
-
-    const delta =
-        0.009;
-
-
-    const south =
-        lat - delta;
-
-    const north =
-        lat + delta;
-
-    const west =
-        lon - delta;
-
-    const east =
-        lon + delta;
-
-
-    const query = `
-[out:json][timeout:50];
-(
-  way["highway"](${south},${west},${north},${east});
-  way["building"](${south},${west},${north},${east});
-);
-out body geom;
-`;
-
-
-    const response =
-        await fetch(
-            OVERPASS,
-            {
-                method: "POST",
-
-                headers: {
-                    "Content-Type":
-                        "text/plain"
-                },
-
-                body: query
-            }
-        );
-
-
-    if (!response.ok) {
-
-        throw new Error(
-            "Impossible de récupérer la carte."
-        );
-    }
-
-
-    const data =
-        await response.json();
-
-
-    return data.elements || [];
-}
-
-
-// ============================================================
-// INITIALISER THREE.JS
-// ============================================================
+// =========================================================
+// THREE.JS - INITIALISATION
+// =========================================================
 
 function initThree() {
 
-    if (
-        typeof THREE ===
-        "undefined"
-    ) {
+    if (!THREE) {
 
-        throw new Error(
-            "Three.js ne s'est pas chargé."
+        console.error(
+            "Three.js non disponible."
         );
+
+        return;
+
     }
+
+
+    const canvas =
+        document.getElementById(
+            "gameCanvas"
+        );
 
 
     scene =
@@ -476,168 +238,117 @@ function initThree() {
 
     scene.background =
         new THREE.Color(
-            0x87c9f5
-        );
-
-
-    scene.fog =
-        new THREE.Fog(
-            0x87c9f5,
-            300,
-            1800
+            0x87ceeb
         );
 
 
     camera =
         new THREE.PerspectiveCamera(
             65,
-            innerWidth /
-            innerHeight,
+            window.innerWidth /
+            window.innerHeight,
             0.1,
-            2500
+            2000
         );
+
+
+    camera.position.set(
+        0,
+        8,
+        12
+    );
 
 
     renderer =
         new THREE.WebGLRenderer({
+            canvas,
             antialias: true
         });
 
 
     renderer.setPixelRatio(
         Math.min(
-            devicePixelRatio,
+            window.devicePixelRatio,
             2
         )
     );
 
 
     renderer.setSize(
-        innerWidth,
-        innerHeight
+        window.innerWidth,
+        window.innerHeight
     );
 
 
-    renderer.shadowMap.enabled =
-        true;
+    clock =
+        new THREE.Clock();
 
 
-    renderer.shadowMap.type =
-        THREE.PCFSoftShadowMap;
+    setupWorld();
+
+    createLocalPlayer();
+
+    animate();
+
+}
 
 
-    game.innerHTML = "";
+// =========================================================
+// MONDE
+// =========================================================
+
+function setupWorld() {
+
+    if (!scene || !THREE) {
+        return;
+    }
 
 
-    game.appendChild(
-        renderer.domElement
-    );
-
+    // Lumière
 
     const ambient =
-        new THREE.HemisphereLight(
+        new THREE.AmbientLight(
             0xffffff,
-            0x557755,
-            2.7
+            1.8
         );
 
-
-    scene.add(
-        ambient
-    );
+    scene.add(ambient);
 
 
     const sun =
         new THREE.DirectionalLight(
             0xffffff,
-            3.2
+            2
         );
-
 
     sun.position.set(
-        300,
-        500,
-        200
+        100,
+        150,
+        50
     );
 
-
-    sun.castShadow =
-        true;
+    scene.add(sun);
 
 
-    sun.shadow.mapSize.width =
-        2048;
+    // Sol
 
-    sun.shadow.mapSize.height =
-        2048;
-
-
-    scene.add(
-        sun
-    );
-}
-
-
-// ============================================================
-// GPS -> MONDE 3D
-// ============================================================
-
-function gpsToWorld(
-    lat,
-    lon
-) {
-
-    const metersLat =
-        111320;
-
-
-    const metersLon =
-        111320 *
-        Math.cos(
-            centerLat *
-            Math.PI /
-            180
+    const groundGeometry =
+        new THREE.PlaneGeometry(
+            1000,
+            1000
         );
 
 
-    return {
-
-        x:
-            (lon - centerLon) *
-            metersLon,
-
-        z:
-            -(lat - centerLat) *
-            metersLat
-
-    };
-}
-
-
-// ============================================================
-// MONDE
-// ============================================================
-
-function buildWorld(
-    elements
-) {
-
-    collisionBuildings = [];
+    const groundMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x4b8b4b
+        });
 
 
     const ground =
         new THREE.Mesh(
-
-            new THREE.PlaneGeometry(
-                2500,
-                2500
-            ),
-
-            new THREE.MeshStandardMaterial({
-                color: 0x5b9b52,
-                roughness: 1
-            })
-
+            groundGeometry,
+            groundMaterial
         );
 
 
@@ -645,415 +356,172 @@ function buildWorld(
         -Math.PI / 2;
 
 
-    ground.receiveShadow =
-        true;
+    scene.add(ground);
 
 
-    scene.add(
-        ground
+    // Routes
+
+    createRoad(
+        0,
+        0,
+        1000,
+        35
     );
 
 
-    // Routes d'abord
+    createRoad(
+        0,
+        0,
+        35,
+        1000
+    );
+
+
     for (
-        const element of elements
+        let i = -300;
+        i <= 300;
+        i += 120
     ) {
 
-        if (
-            element.type !== "way" ||
-            !element.geometry
-        ) {
+        createRoad(
+            i,
+            0,
+            22,
+            1000
+        );
 
-            continue;
-        }
+        createRoad(
+            0,
+            i,
+            1000,
+            22
+        );
 
-
-        if (
-            element.tags &&
-            element.tags.highway
-        ) {
-
-            createRoad(
-                element
-            );
-        }
     }
 
 
-    // Bâtiments ensuite
+    // Quelques bâtiments
+
     for (
-        const element of elements
+        let x = -300;
+        x <= 300;
+        x += 60
     ) {
 
-        if (
-            element.type !== "way" ||
-            !element.geometry
+        for (
+            let z = -300;
+            z <= 300;
+            z += 60
         ) {
 
-            continue;
-        }
+            if (
+                Math.abs(x) < 25 ||
+                Math.abs(z) < 25
+            ) {
 
+                continue;
 
-        if (
-            element.tags &&
-            element.tags.building
-        ) {
+            }
 
             createBuilding(
-                element
+                x,
+                z
             );
+
         }
+
     }
+
 }
 
 
-// ============================================================
-// ROUTES
-// ============================================================
+// =========================================================
+// ROUTE
+// =========================================================
 
 function createRoad(
-    way
+    x,
+    z,
+    width,
+    depth
 ) {
-
-    const validRoads = [
-
-        "motorway",
-        "trunk",
-        "primary",
-        "secondary",
-        "tertiary",
-        "residential",
-        "living_street",
-        "unclassified",
-        "service"
-
-    ];
-
-
-    if (
-        !validRoads.includes(
-            way.tags.highway
-        )
-    ) {
-
-        return;
-    }
-
-
-    let width =
-        5;
-
-
-    switch (
-        way.tags.highway
-    ) {
-
-        case "motorway":
-        case "trunk":
-
-            width = 12;
-
-            break;
-
-
-        case "primary":
-
-            width = 9;
-
-            break;
-
-
-        case "secondary":
-
-            width = 8;
-
-            break;
-
-
-        case "tertiary":
-
-            width = 7;
-
-            break;
-
-    }
-
-
-    const points =
-        way.geometry.map(
-            point =>
-                gpsToWorld(
-                    point.lat,
-                    point.lon
-                )
-        );
-
-
-    for (
-        let i = 0;
-        i < points.length - 1;
-        i++
-    ) {
-
-        createRoadSegment(
-            points[i],
-            points[i + 1],
-            width
-        );
-    }
-}
-
-
-function createRoadSegment(
-    a,
-    b,
-    width
-) {
-
-    const dx =
-        b.x - a.x;
-
-
-    const dz =
-        b.z - a.z;
-
-
-    const length =
-        Math.sqrt(
-            dx * dx +
-            dz * dz
-        );
-
-
-    if (
-        length < 0.5
-    ) {
-
-        return;
-    }
-
-
-    const road =
-        new THREE.Mesh(
-
-            new THREE.BoxGeometry(
-                width,
-                0.12,
-                length
-            ),
-
-            new THREE.MeshStandardMaterial({
-                color: 0x3b3b3b,
-                roughness: 0.9
-            })
-
-        );
-
-
-    road.position.set(
-
-        (a.x + b.x) / 2,
-
-        0.06,
-
-        (a.z + b.z) / 2
-
-    );
-
-
-    road.rotation.y =
-        Math.atan2(
-            dx,
-            dz
-        );
-
-
-    road.receiveShadow =
-        true;
-
-
-    scene.add(
-        road
-    );
-
-
-    if (
-        width >= 8
-    ) {
-
-        const line =
-            new THREE.Mesh(
-
-                new THREE.BoxGeometry(
-                    0.12,
-                    0.02,
-                    length
-                ),
-
-                new THREE.MeshBasicMaterial({
-                    color: 0xffffff
-                })
-
-            );
-
-
-        line.position.copy(
-            road.position
-        );
-
-
-        line.position.y =
-            0.13;
-
-
-        line.rotation.y =
-            road.rotation.y;
-
-
-        scene.add(
-            line
-        );
-    }
-}
-
-
-// ============================================================
-// BÂTIMENT RÉALISTE
-// ============================================================
-
-function createBuilding(
-    way
-) {
-
-    if (
-        way.geometry.length < 3
-    ) {
-
-        return;
-    }
-
-
-    const points =
-        way.geometry.map(
-            point =>
-                gpsToWorld(
-                    point.lat,
-                    point.lon
-                )
-        );
-
-
-    const shape =
-        new THREE.Shape();
-
-
-    points.forEach(
-        (point, index) => {
-
-            if (index === 0) {
-
-                shape.moveTo(
-                    point.x,
-                    -point.z
-                );
-
-            } else {
-
-                shape.lineTo(
-                    point.x,
-                    -point.z
-                );
-            }
-        }
-    );
-
-
-    shape.closePath();
-
-
-    let height =
-        6;
-
-
-    if (
-        way.tags.height
-    ) {
-
-        const h =
-            parseFloat(
-                way.tags.height
-            );
-
-
-        if (
-            Number.isFinite(h)
-        ) {
-
-            height =
-                Math.min(
-                    Math.max(
-                        h,
-                        3
-                    ),
-                    80
-                );
-        }
-    }
-
-
-    if (
-        way.tags["building:levels"]
-    ) {
-
-        const levels =
-            parseInt(
-                way.tags["building:levels"]
-            );
-
-
-        if (
-            Number.isFinite(levels)
-        ) {
-
-            height =
-                Math.min(
-                    Math.max(
-                        levels * 3,
-                        3
-                    ),
-                    80
-                );
-        }
-    }
-
 
     const geometry =
-        new THREE.ExtrudeGeometry(
-            shape,
-            {
-                depth: height,
-
-                bevelEnabled: false,
-
-                steps: 1
-            }
+        new THREE.BoxGeometry(
+            width,
+            0.08,
+            depth
         );
-
-
-    geometry.rotateX(
-        -Math.PI / 2
-    );
 
 
     const material =
         new THREE.MeshStandardMaterial({
+            color: 0x333333
+        });
 
+
+    const road =
+        new THREE.Mesh(
+            geometry,
+            material
+        );
+
+
+    road.position.set(
+        x,
+        0.04,
+        z
+    );
+
+
+    scene.add(road);
+
+}
+
+
+// =========================================================
+// BÂTIMENT
+// =========================================================
+
+function createBuilding(
+    x,
+    z
+) {
+
+    const width =
+        25 +
+        Math.random() * 20;
+
+
+    const depth =
+        25 +
+        Math.random() * 20;
+
+
+    const height =
+        10 +
+        Math.random() * 40;
+
+
+    const geometry =
+        new THREE.BoxGeometry(
+            width,
+            height,
+            depth
+        );
+
+
+    const material =
+        new THREE.MeshStandardMaterial({
             color:
-                buildingColor(
-                    way.tags.building
-                ),
-
-            roughness: 0.78
+                new THREE.Color(
+                    0.25 +
+                    Math.random() * 0.25,
+                    0.25 +
+                    Math.random() * 0.25,
+                    0.25 +
+                    Math.random() * 0.25
+                )
         });
 
 
@@ -1064,284 +532,205 @@ function createBuilding(
         );
 
 
-    building.position.y =
-        0;
-
-
-    building.castShadow =
-        true;
-
-
-    building.receiveShadow =
-        true;
-
-
-    scene.add(
-        building
+    building.position.set(
+        x,
+        height / 2,
+        z
     );
 
 
-    // --------------------------------------------------------
-    // COLLISION
-    // --------------------------------------------------------
+    scene.add(building);
 
-    const collision =
-        getBuildingBounds(
-            points,
-            height
+}
+
+
+// =========================================================
+// CRÉER JOUEUR LOCAL
+// =========================================================
+
+function createLocalPlayer() {
+
+    if (!THREE || !scene) {
+        return;
+    }
+
+
+    if (localPlayer) {
+
+        scene.remove(
+            localPlayer
+        );
+
+    }
+
+
+    localPlayer =
+        createVehicleObject(
+            currentVehicle
         );
 
 
-    collisionBuildings.push({
-
-        minX: collision.minX,
-
-        maxX: collision.maxX,
-
-        minZ: collision.minZ,
-
-        maxZ: collision.maxZ,
-
-        element: way,
-
-        mesh: building
-
-    });
-
-
-    // --------------------------------------------------------
-    // INFOS
-    // --------------------------------------------------------
-
-    building.userData.osm =
-        way;
-
-
-    building.userData.photo =
-        null;
-
-
-    building.userData.photoLoading =
-        false;
-}
-
-
-// ============================================================
-// BOUNDS BÂTIMENT
-// ============================================================
-
-function getBuildingBounds(
-    points,
-    height
-) {
-
-    let minX =
-        Infinity;
-
-    let maxX =
-        -Infinity;
-
-    let minZ =
-        Infinity;
-
-    let maxZ =
-        -Infinity;
-
-
-    points.forEach(
-        point => {
-
-            minX =
-                Math.min(
-                    minX,
-                    point.x
-                );
-
-
-            maxX =
-                Math.max(
-                    maxX,
-                    point.x
-                );
-
-
-            minZ =
-                Math.min(
-                    minZ,
-                    point.z
-                );
-
-
-            maxZ =
-                Math.max(
-                    maxZ,
-                    point.z
-                );
-        }
+    localPlayer.position.set(
+        playerPosition.x,
+        1,
+        playerPosition.z
     );
 
 
-    return {
+    scene.add(
+        localPlayer
+    );
 
-        minX,
-        maxX,
-        minZ,
-        maxZ,
-        height
-
-    };
 }
 
 
-// ============================================================
-// COULEUR BÂTIMENT
-// ============================================================
+// =========================================================
+// CRÉER VÉHICULE
+// =========================================================
 
-function buildingColor(
-    type
+function createVehicleObject(
+    vehicle
 ) {
 
-    if (
-        type === "industrial"
-    ) {
-
-        return 0x9da3a8;
-    }
-
-
-    if (
-        type === "commercial"
-    ) {
-
-        return 0xc6c6c6;
-    }
-
-
-    if (
-        type === "school"
-    ) {
-
-        return 0xe2c18f;
-    }
-
-
-    if (
-        type === "church"
-    ) {
-
-        return 0xd8d0c0;
-    }
-
-
-    if (
-        type === "house"
-    ) {
-
-        return 0xd7c7b5;
-    }
-
-
-    if (
-        type === "apartments"
-    ) {
-
-        return 0xbfc8cc;
-    }
-
-
-    const colors = [
-
-        0xd7d1c5,
-        0xc9c9c9,
-        0xe1c7aa,
-        0xbfc8cc,
-        0xd6b9a0
-
-    ];
-
-
-    return colors[
-        Math.floor(
-            Math.random() *
-            colors.length
-        )
-    ];
-}
-
-
-// ============================================================
-// VOITURE
-// ============================================================
-
-function createPlayer() {
-
-    player =
+    const group =
         new THREE.Group();
+
+
+    let color =
+        0x1677ff;
+
+
+    if (vehicle === "truck") {
+        color = 0x9b59b6;
+    }
+
+    if (vehicle === "bus") {
+        color = 0xf1c40f;
+    }
+
+    if (vehicle === "plane") {
+        color = 0xffffff;
+    }
+
+    if (vehicle === "boat") {
+        color = 0x3498db;
+    }
+
+    if (vehicle === "walk") {
+        color = 0x2ecc71;
+    }
+
+
+    // Corps
+
+    const bodyGeometry =
+        new THREE.BoxGeometry(
+            vehicle === "bus"
+                ? 3
+                : 2.5,
+            1,
+            vehicle === "truck"
+                ? 5
+                : 4
+        );
+
+
+    const bodyMaterial =
+        new THREE.MeshStandardMaterial({
+            color
+        });
 
 
     const body =
         new THREE.Mesh(
-
-            new THREE.BoxGeometry(
-                2.8,
-                1,
-                4.8
-            ),
-
-            new THREE.MeshStandardMaterial({
-                color: 0x1264ff,
-                roughness: 0.5
-            })
-
+            bodyGeometry,
+            bodyMaterial
         );
 
 
     body.position.y =
-        1;
+        0.8;
 
 
-    body.castShadow =
-        true;
+    group.add(body);
 
 
-    player.add(
-        body
-    );
+    // Cabine
 
+    if (
+        vehicle === "car" ||
+        vehicle === "truck" ||
+        vehicle === "bus"
+    ) {
 
-    const roof =
-        new THREE.Mesh(
-
+        const cabinGeometry =
             new THREE.BoxGeometry(
-                2.1,
-                0.7,
-                2.3
-            ),
+                1.8,
+                0.9,
+                1.8
+            );
 
+
+        const cabinMaterial =
             new THREE.MeshStandardMaterial({
-                color: 0x20252a
-            })
+                color: 0x9ed8ff
+            });
 
+
+        const cabin =
+            new THREE.Mesh(
+                cabinGeometry,
+                cabinMaterial
+            );
+
+
+        cabin.position.set(
+            0,
+            1.65,
+            -0.2
         );
 
 
-    roof.position.set(
-        0,
-        1.75,
-        -0.2
-    );
+        group.add(cabin);
+
+    }
 
 
-    player.add(
-        roof
-    );
+    // Roues
 
+    if (
+        vehicle === "car" ||
+        vehicle === "truck" ||
+        vehicle === "bus"
+    ) {
+
+        createWheels(
+            group,
+            vehicle
+        );
+
+    }
+
+
+    return group;
+
+}
+
+
+// =========================================================
+// ROUES
+// =========================================================
+
+function createWheels(
+    group,
+    vehicle
+) {
 
     const wheelGeometry =
         new THREE.CylinderGeometry(
-            0.5,
-            0.5,
-            0.38,
+            0.45,
+            0.45,
+            0.3,
             16
         );
 
@@ -1352,17 +741,17 @@ function createPlayer() {
         });
 
 
-    const wheels = [
+    const positions = [
 
-        [-1.45, 0.5, -1.55],
-        [1.45, 0.5, -1.55],
-        [-1.45, 0.5, 1.55],
-        [1.45, 0.5, 1.55]
+        [-1.25, 0.45, -1.35],
+        [1.25, 0.45, -1.35],
+        [-1.25, 0.45, 1.35],
+        [1.25, 0.45, 1.35]
 
     ];
 
 
-    wheels.forEach(
+    positions.forEach(
         position => {
 
             const wheel =
@@ -1383,219 +772,3295 @@ function createPlayer() {
             );
 
 
-            player.add(
+            group.add(
                 wheel
             );
+
         }
     );
 
-
-    scene.add(
-        player
-    );
-
-
-    player.position.set(
-        0,
-        0,
-        0
-    );
 }
 
 
-// ============================================================
-// COLLISION JOUEUR / BÂTIMENT
-// ============================================================
+// =========================================================
+// ANIMATION
+// =========================================================
 
-function isColliding(
-    x,
-    z
-) {
+function animate() {
 
-    for (
-        const building of collisionBuildings
+    requestAnimationFrame(
+        animate
+    );
+
+
+    const delta =
+        clock
+            ? clock.getDelta()
+            : 0.016;
+
+
+    if (
+        isPlaying &&
+        !isPaused
     ) {
 
-        if (
-            x + PLAYER_RADIUS >
-            building.minX &&
+        updateLocalPlayer(
+            delta
+        );
 
-            x - PLAYER_RADIUS <
-            building.maxX &&
-
-            z + PLAYER_RADIUS >
-            building.minZ &&
-
-            z - PLAYER_RADIUS <
-            building.maxZ
-        ) {
-
-            return true;
-        }
     }
 
 
-    return false;
+    updateCamera();
+
+    renderer?.render(
+        scene,
+        camera
+    );
+
 }
 
 
-// ============================================================
+// =========================================================
+// JOUEUR LOCAL
+// =========================================================
+
+function updateLocalPlayer(
+    delta
+) {
+
+    let speed =
+        inVehicle
+            ? 18
+            : 7;
+
+
+    if (
+        currentVehicle === "plane"
+    ) {
+
+        speed = 30;
+
+    }
+
+
+    if (
+        currentVehicle === "boat"
+    ) {
+
+        speed = 12;
+
+    }
+
+
+    let moveX = 0;
+    let moveZ = 0;
+
+
+    if (
+        controls.forward
+    ) {
+
+        moveZ -= 1;
+
+    }
+
+
+    if (
+        controls.backward
+    ) {
+
+        moveZ += 1;
+
+    }
+
+
+    if (
+        controls.left
+    ) {
+
+        playerRotation +=
+            2.5 * delta;
+
+    }
+
+
+    if (
+        controls.right
+    ) {
+
+        playerRotation -=
+            2.5 * delta;
+
+    }
+
+
+    if (
+        joystickActive
+    ) {
+
+        moveX +=
+            joystickX;
+
+        moveZ +=
+            joystickY;
+
+    }
+
+
+    const length =
+        Math.hypot(
+            moveX,
+            moveZ
+        );
+
+
+    if (
+        length > 1
+    ) {
+
+        moveX /= length;
+        moveZ /= length;
+
+    }
+
+
+    const sin =
+        Math.sin(
+            playerRotation
+        );
+
+
+    const cos =
+        Math.cos(
+            playerRotation
+        );
+
+
+    const worldX =
+        moveX * cos -
+        moveZ * sin;
+
+
+    const worldZ =
+        moveX * sin +
+        moveZ * cos;
+
+
+    playerPosition.x +=
+        worldX *
+        speed *
+        delta;
+
+
+    playerPosition.z +=
+        worldZ *
+        speed *
+        delta;
+
+
+    if (localPlayer) {
+
+        localPlayer.position.x =
+            playerPosition.x;
+
+        localPlayer.position.z =
+            playerPosition.z;
+
+        localPlayer.rotation.y =
+            playerRotation;
+
+    }
+
+
+    sendPlayerPosition();
+
+}
+
+
+// =========================================================
 // CAMÉRA
-// ============================================================
+// =========================================================
 
 function updateCamera() {
 
-    if (!player)
+    if (
+        !camera ||
+        !localPlayer
+    ) {
+
         return;
+
+    }
 
 
     const distance =
-        13;
+        inVehicle
+            ? 12
+            : 8;
 
 
     const height =
-        7;
+        inVehicle
+            ? 7
+            : 5;
 
 
-    camera.position.x =
-        player.position.x +
+    const targetX =
+        playerPosition.x -
         Math.sin(
-            cameraAngle
+            playerRotation
         ) *
         distance;
 
 
-    camera.position.y =
-        height;
-
-
-    camera.position.z =
-        player.position.z +
+    const targetZ =
+        playerPosition.z -
         Math.cos(
-            cameraAngle
+            playerRotation
         ) *
         distance;
+
+
+    camera.position.x +=
+        (
+            targetX -
+            camera.position.x
+        ) * 0.08;
+
+
+    camera.position.y +=
+        (
+            height -
+            camera.position.y
+        ) * 0.08;
+
+
+    camera.position.z +=
+        (
+            targetZ -
+            camera.position.z
+        ) * 0.08;
 
 
     camera.lookAt(
-
-        player.position.x,
-
+        playerPosition.x,
         1,
-
-        player.position.z
-
+        playerPosition.z
     );
+
 }
 
 
-const cameraLeft =
-    document.getElementById(
-        "cameraLeft"
-    );
+// =========================================================
+// WEBSOCKET
+// =========================================================
+
+function connectWebSocket() {
+
+    try {
+
+        socket =
+            new WebSocket(
+                SERVER_URL
+            );
 
 
-if (cameraLeft) {
+        socket.onopen =
+            () => {
 
-    cameraLeft.addEventListener(
-        "click",
-        () => {
+                connected = true;
 
-            cameraAngle -=
-                0.35;
+                console.log(
+                    "🟢 RoadGame connecté"
+                );
 
-            updateCamera();
+                showNotification(
+                    "Serveur connecté"
+                );
 
-        }
-    );
-}
-
-
-const cameraRight =
-    document.getElementById(
-        "cameraRight"
-    );
+            };
 
 
-if (cameraRight) {
+        socket.onclose =
+            () => {
 
-    cameraRight.addEventListener(
-        "click",
-        () => {
+                connected = false;
 
-            cameraAngle +=
-                0.35;
+                console.log(
+                    "🔴 Serveur déconnecté"
+                );
 
-            updateCamera();
+                showNotification(
+                    "Serveur déconnecté"
+                );
 
-        }
-    );
-}
-
-
-// ============================================================
-// JOYSTICK
-// ============================================================
-
-joystick.addEventListener(
-    "touchstart",
-    event => {
-
-        event.preventDefault();
-
-        joystickActive =
-            true;
+            };
 
 
-        updateJoystick(
-            event.touches[0]
+        socket.onerror =
+            error => {
+
+                console.error(
+                    "WebSocket error",
+                    error
+                );
+
+            };
+
+
+        socket.onmessage =
+            event => {
+
+                try {
+
+                    const data =
+                        JSON.parse(
+                            event.data
+                        );
+
+                    handleServerMessage(
+                        data
+                    );
+
+                } catch (error) {
+
+                    console.error(
+                        "Message serveur invalide",
+                        error
+                    );
+
+                }
+
+            };
+
+    } catch (error) {
+
+        console.error(
+            "Impossible de créer WebSocket",
+            error
         );
 
-    },
-    {
-        passive: false
     }
-);
+
+}
 
 
-joystick.addEventListener(
-    "touchmove",
-    event => {
+// =========================================================
+// ENVOYER MESSAGE
+// =========================================================
 
-        event.preventDefault();
+function send(data) {
+
+    if (
+        !socket ||
+        socket.readyState !==
+            WebSocket.OPEN
+    ) {
+
+        showNotification(
+            "Serveur non connecté"
+        );
+
+        return false;
+
+    }
 
 
-        if (
-            joystickActive
-        ) {
+    socket.send(
+        JSON.stringify(
+            data
+        )
+    );
 
-            updateJoystick(
-                event.touches[0]
+
+    return true;
+
+}
+
+
+// =========================================================
+// MESSAGES SERVEUR
+// =========================================================
+
+function handleServerMessage(
+    data
+) {
+
+    switch (
+        data.type
+    ) {
+
+        case "connected":
+
+            break;
+
+
+        case "account_created":
+
+            currentUser =
+                data.user;
+
+            updateUserInterface();
+
+            showMainMenu();
+
+            showNotification(
+                "Compte créé !"
             );
+
+            break;
+
+
+        case "login_success":
+
+            currentUser =
+                data.user;
+
+            selectedVehicle =
+                currentUser.selectedVehicle ||
+                "car";
+
+            updateUserInterface();
+
+            showMainMenu();
+
+            showNotification(
+                "Connexion réussie !"
+            );
+
+            break;
+
+
+        case "username_changed":
+
+            if (currentUser) {
+
+                currentUser.username =
+                    data.username;
+
+            }
+
+            updateUserInterface();
+
+            closeScreen(
+                "usernameScreen"
+            );
+
+            showNotification(
+                "Pseudo modifié"
+            );
+
+            break;
+
+
+        case "friend_request_sent":
+
+            showNotification(
+                "Demande envoyée à " +
+                data.username
+            );
+
+            break;
+
+
+        case "friend_added":
+
+            currentUser =
+                data.user;
+
+            updateFriendsUI();
+
+            showNotification(
+                "Ami ajouté !"
+            );
+
+            break;
+
+
+        case "room_created":
+
+            currentRoom =
+                data.room;
+
+            currentPlayerId =
+                data.playerId;
+
+            updateRoomUI(
+                data
+            );
+
+            openScreen(
+                "roomScreen"
+            );
+
+            break;
+
+
+        case "private_room_created":
+
+            showNotification(
+                "Serveur privé créé"
+            );
+
+            break;
+
+
+        case "room_joined":
+
+            currentRoom =
+                data.room;
+
+            currentPlayerId =
+                data.playerId;
+
+            updateRoomUI(
+                data
+            );
+
+            openScreen(
+                "roomScreen"
+            );
+
+            break;
+
+
+        case "quick_match_searching":
+
+            showNotification(
+                "Recherche d'une partie..."
+            );
+
+            break;
+
+
+        case "quick_match_found":
+
+            currentRoom =
+                data.room;
+
+            currentPlayerId =
+                data.playerId;
+
+            updateRoomUI(
+                data
+            );
+
+            openScreen(
+                "roomScreen"
+            );
+
+            showNotification(
+                "Partie rapide trouvée !"
+            );
+
+            break;
+
+
+        case "player_joined":
+
+            addRemotePlayer(
+                data.player
+            );
+
+            updatePlayersList();
+
+            break;
+
+
+        case "player_update":
+
+            updateRemotePlayer(
+                data.player
+            );
+
+            break;
+
+
+        case "vehicle_update":
+
+            updateRemoteVehicle(
+                data
+            );
+
+            break;
+
+
+        case "vehicle_enter":
+
+            updateRemoteVehicle(
+                data
+            );
+
+            break;
+
+
+        case "vehicle_exit":
+
+            updateRemoteVehicle(
+                {
+                    ...data,
+                    vehicle: "walk",
+                    inVehicle: false
+                }
+            );
+
+            break;
+
+
+        case "player_left":
+
+            removeRemotePlayer(
+                data.playerId
+            );
+
+            updatePlayersList();
+
+            break;
+
+
+        case "vehicle_purchased":
+
+            if (currentUser) {
+
+                currentUser.vehicles =
+                    data.vehicles;
+
+            }
+
+            updateGarageUI();
+
+            updateShopUI();
+
+            showNotification(
+                "Véhicule ajouté au garage !"
+            );
+
+            break;
+
+
+        case "settings_updated":
+
+            if (currentUser) {
+
+                currentUser.settings =
+                    data.settings;
+
+            }
+
+            break;
+
+
+        case "error":
+
+            showNotification(
+                data.message ||
+                "Une erreur est survenue."
+            );
+
+            showErrorInCurrentScreen(
+                data.message
+            );
+
+            break;
+
+
+        case "pong":
+
+            break;
+
+    }
+
+}
+
+
+// =========================================================
+// INSCRIPTION
+// =========================================================
+
+function register() {
+
+    const username =
+        document.getElementById(
+            "usernameInput"
+        )?.value.trim();
+
+
+    const password =
+        document.getElementById(
+            "passwordInput"
+        )?.value;
+
+
+    if (!username || !password) {
+
+        setAuthMessage(
+            "Remplis tous les champs."
+        );
+
+        return;
+
+    }
+
+
+    send({
+
+        type:
+            "register",
+
+        username,
+
+        password
+
+    });
+
+}
+
+
+// =========================================================
+// CONNEXION
+// =========================================================
+
+function login() {
+
+    const username =
+        document.getElementById(
+            "usernameInput"
+        )?.value.trim();
+
+
+    const password =
+        document.getElementById(
+            "passwordInput"
+        )?.value;
+
+
+    if (!username || !password) {
+
+        setAuthMessage(
+            "Remplis tous les champs."
+        );
+
+        return;
+
+    }
+
+
+    send({
+
+        type:
+            "login",
+
+        username,
+
+        password
+
+    });
+
+}
+
+
+// =========================================================
+// JOUER SANS COMPTE
+// =========================================================
+
+function playGuest() {
+
+    currentUser = {
+
+        id: null,
+
+        username: "Joueur",
+
+        friends: [],
+
+        friendRequests: [],
+
+        vehicles: [
+            "car"
+        ],
+
+        selectedVehicle: "car",
+
+        settings: {
+
+            sound: true,
+
+            music: true
+
         }
 
-    },
-    {
-        passive: false
+    };
+
+
+    selectedVehicle =
+        "car";
+
+
+    showMainMenu();
+
+}
+
+
+// =========================================================
+// PARTIE RAPIDE
+// =========================================================
+
+function startQuickMatch() {
+
+    send({
+
+        type:
+            "quick_match",
+
+        vehicle:
+            selectedVehicle
+
+    });
+
+}
+
+
+// =========================================================
+// CRÉER PARTIE
+// =========================================================
+
+function createPublicRoom() {
+
+    send({
+
+        type:
+            "create_room",
+
+        vehicle:
+            selectedVehicle
+
+    });
+
+}
+
+
+// =========================================================
+// CRÉER PARTIE PRIVÉE
+// =========================================================
+
+function createPrivateRoom() {
+
+    const password =
+        document.getElementById(
+            "privatePasswordInput"
+        )?.value;
+
+
+    if (!password) {
+
+        setMessage(
+            "privateRoomMessage",
+            "Entre un mot de passe."
+        );
+
+        return;
+
     }
-);
 
 
-joystick.addEventListener(
-    "touchend",
-    resetJoystick
-);
+    send({
+
+        type:
+            "create_private_room",
+
+        password,
+
+        vehicle:
+            selectedVehicle
+
+    });
+
+}
 
 
-joystick.addEventListener(
-    "touchcancel",
-    resetJoystick
-);
+// =========================================================
+// REJOINDRE
+// =========================================================
+
+function joinRoom() {
+
+    const room =
+        document.getElementById(
+            "roomCodeInput"
+        )?.value.trim();
+
+
+    const password =
+        document.getElementById(
+            "roomPasswordInput"
+        )?.value || "";
+
+
+    if (!room) {
+
+        setMessage(
+            "multiplayerMessage",
+            "Entre le code de la partie."
+        );
+
+        return;
+
+    }
+
+
+    send({
+
+        type:
+            "join_room",
+
+        room,
+
+        password,
+
+        vehicle:
+            selectedVehicle
+
+    });
+
+}
+
+
+// =========================================================
+// DÉMARRER LE JEU
+// =========================================================
+
+function startGame() {
+
+    isPlaying = true;
+
+    isPaused = false;
+
+
+    closeAllScreens();
+
+
+    const hud =
+        document.getElementById(
+            "gameHud"
+        );
+
+
+    hud?.classList.remove(
+        "hidden"
+    );
+
+
+    updateHud();
+
+
+    if (
+        currentRoom
+    ) {
+
+        send({
+
+            type:
+                "player_update",
+
+            latitude:
+                48.8566,
+
+            longitude:
+                2.3522,
+
+            rotation:
+                playerRotation
+
+        });
+
+    }
+
+}
+
+
+// =========================================================
+// SORTIR DU JEU
+// =========================================================
+
+function exitGame() {
+
+    isPlaying = false;
+
+    isPaused = false;
+
+    currentRoom = null;
+
+    currentPlayerId = null;
+
+
+    document.getElementById(
+        "gameHud"
+    )?.classList.add(
+        "hidden"
+    );
+
+
+    removeAllRemotePlayers();
+
+
+    showMainMenu();
+
+}
+
+
+// =========================================================
+// ENTRER DANS VÉHICULE
+// =========================================================
+
+function enterVehicle() {
+
+    if (inVehicle) {
+        return;
+    }
+
+
+    inVehicle = true;
+
+    currentVehicle =
+        selectedVehicle;
+
+
+    createLocalPlayer();
+
+    updateHud();
+
+
+    send({
+
+        type:
+            "enter_vehicle",
+
+        vehicle:
+            currentVehicle
+
+    });
+
+
+    updateVehicleButtons();
+
+}
+
+
+// =========================================================
+// SORTIR DU VÉHICULE
+// =========================================================
+
+function exitVehicle() {
+
+    if (!inVehicle) {
+        return;
+    }
+
+
+    inVehicle = false;
+
+    currentVehicle =
+        "walk";
+
+
+    createLocalPlayer();
+
+    updateHud();
+
+
+    send({
+
+        type:
+            "exit_vehicle"
+
+    });
+
+
+    updateVehicleButtons();
+
+}
+
+
+// =========================================================
+// CHOISIR VÉHICULE
+// =========================================================
+
+function selectVehicle(
+    vehicle
+) {
+
+    if (
+        !VEHICLES[vehicle]
+    ) {
+        return;
+    }
+
+
+    if (
+        currentUser &&
+        currentUser.vehicles &&
+        !currentUser.vehicles.includes(
+            vehicle
+        )
+    ) {
+
+        showNotification(
+            "Tu ne possèdes pas ce véhicule."
+        );
+
+        return;
+
+    }
+
+
+    selectedVehicle =
+        vehicle;
+
+
+    if (
+        currentUser
+    ) {
+
+        currentUser.selectedVehicle =
+            vehicle;
+
+    }
+
+
+    updateGarageUI();
+
+}
+
+
+// =========================================================
+// UTILISER VÉHICULE
+// =========================================================
+
+function useSelectedVehicle() {
+
+    currentVehicle =
+        selectedVehicle;
+
+    inVehicle =
+        selectedVehicle !== "walk";
+
+
+    createLocalPlayer();
+
+    updateHud();
+
+    updateVehicleButtons();
+
+
+    send({
+
+        type:
+            "vehicle_update",
+
+        vehicle:
+            selectedVehicle
+
+    });
+
+
+    closeScreen(
+        "garageScreen"
+    );
+
+
+    showNotification(
+        VEHICLES[
+            selectedVehicle
+        ].icon +
+        " " +
+        VEHICLES[
+            selectedVehicle
+        ].name +
+        " sélectionné"
+    );
+
+}
+
+
+// =========================================================
+// ACHETER
+// =========================================================
+
+function buyVehicle(
+    vehicle
+) {
+
+    send({
+
+        type:
+            "buy_vehicle",
+
+        vehicle
+
+    });
+
+}
+
+
+// =========================================================
+// POSITION MULTIJOUEUR
+// =========================================================
+
+let lastPositionSend = 0;
+
+
+function sendPlayerPosition() {
+
+    if (
+        !currentRoom ||
+        !socket ||
+        socket.readyState !==
+            WebSocket.OPEN
+    ) {
+
+        return;
+
+    }
+
+
+    const now =
+        performance.now();
+
+
+    if (
+        now - lastPositionSend <
+        50
+    ) {
+
+        return;
+
+    }
+
+
+    lastPositionSend =
+        now;
+
+
+    send({
+
+        type:
+            "player_update",
+
+        latitude:
+            48.8566 +
+            playerPosition.z /
+            111000,
+
+        longitude:
+            2.3522 +
+            playerPosition.x /
+            111000,
+
+        rotation:
+            playerRotation
+
+    });
+
+}
+
+
+// =========================================================
+// JOUEUR DISTANT
+// =========================================================
+
+function addRemotePlayer(
+    player
+) {
+
+    if (
+        !player ||
+        player.id ===
+            currentPlayerId
+    ) {
+
+        return;
+
+    }
+
+
+    removeRemotePlayer(
+        player.id
+    );
+
+
+    const object =
+        createVehicleObject(
+            player.vehicle ||
+            "car"
+        );
+
+
+    object.position.set(
+        gpsToX(
+            player.longitude
+        ),
+        1,
+        gpsToZ(
+            player.latitude
+        )
+    );
+
+
+    object.rotation.y =
+        player.rotation || 0;
+
+
+    scene?.add(
+        object
+    );
+
+
+    remotePlayers.set(
+        player.id,
+        {
+            object,
+            data: player
+        }
+    );
+
+}
+
+
+function updateRemotePlayer(
+    player
+) {
+
+    if (
+        !player ||
+        player.id ===
+            currentPlayerId
+    ) {
+
+        return;
+
+    }
+
+
+    let remote =
+        remotePlayers.get(
+            player.id
+        );
+
+
+    if (!remote) {
+
+        addRemotePlayer(
+            player
+        );
+
+        return;
+
+    }
+
+
+    remote.data =
+        player;
+
+
+    remote.object.position.x =
+        gpsToX(
+            player.longitude
+        );
+
+
+    remote.object.position.z =
+        gpsToZ(
+            player.latitude
+        );
+
+
+    remote.object.rotation.y =
+        player.rotation || 0;
+
+}
+
+
+function updateRemoteVehicle(
+    data
+) {
+
+    const remote =
+        remotePlayers.get(
+            data.playerId
+        );
+
+
+    if (!remote) {
+        return;
+    }
+
+
+    remote.data.vehicle =
+        data.vehicle;
+
+
+    remote.data.inVehicle =
+        data.inVehicle;
+
+
+    const position =
+        remote.object.position.clone();
+
+
+    scene?.remove(
+        remote.object
+    );
+
+
+    const newObject =
+        createVehicleObject(
+            data.vehicle ||
+            "walk"
+        );
+
+
+    newObject.position.copy(
+        position
+    );
+
+
+    scene?.add(
+        newObject
+    );
+
+
+    remote.object =
+        newObject;
+
+}
+
+
+function removeRemotePlayer(
+    id
+) {
+
+    const remote =
+        remotePlayers.get(id);
+
+
+    if (!remote) {
+        return;
+    }
+
+
+    scene?.remove(
+        remote.object
+    );
+
+
+    remotePlayers.delete(
+        id
+    );
+
+}
+
+
+function removeAllRemotePlayers() {
+
+    remotePlayers.forEach(
+        remote => {
+
+            scene?.remove(
+                remote.object
+            );
+
+        }
+    );
+
+
+    remotePlayers.clear();
+
+}
+
+
+// =========================================================
+// GPS → MONDE
+// =========================================================
+
+function gpsToX(
+    longitude
+) {
+
+    return (
+        longitude -
+        2.3522
+    ) * 111000;
+
+}
+
+
+function gpsToZ(
+    latitude
+) {
+
+    return (
+        latitude -
+        48.8566
+    ) * 111000;
+
+}
+
+
+// =========================================================
+// HUD
+// =========================================================
+
+function updateHud() {
+
+    const name =
+        document.getElementById(
+            "hudPlayerName"
+        );
+
+
+    const vehicle =
+        document.getElementById(
+            "hudVehicle"
+        );
+
+
+    if (name) {
+
+        name.textContent =
+            currentUser
+                ? currentUser.username
+                : "Joueur";
+
+    }
+
+
+    if (vehicle) {
+
+        const vehicleData =
+            VEHICLES[
+                currentVehicle
+            ];
+
+
+        vehicle.textContent =
+            vehicleData
+                ? vehicleData.icon +
+                  " " +
+                  vehicleData.name
+                : "À pied";
+
+    }
+
+
+    updateVehicleButtons();
+
+}
+
+
+function updateVehicleButtons() {
+
+    const enter =
+        document.getElementById(
+            "enterVehicleButton"
+        );
+
+
+    const exit =
+        document.getElementById(
+            "exitVehicleButton"
+        );
+
+
+    if (!enter || !exit) {
+        return;
+    }
+
+
+    if (inVehicle) {
+
+        enter.classList.add(
+            "hidden"
+        );
+
+        exit.classList.remove(
+            "hidden"
+        );
+
+    } else {
+
+        enter.classList.remove(
+            "hidden"
+        );
+
+        exit.classList.add(
+            "hidden"
+        );
+
+    }
+
+}
+
+
+// =========================================================
+// GARAGE
+// =========================================================
+
+function updateGarageUI() {
+
+    const container =
+        document.getElementById(
+            "garageVehicles"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    container.innerHTML = "";
+
+
+    const owned =
+        currentUser?.vehicles ||
+        ["car"];
+
+
+    owned.forEach(
+        vehicle => {
+
+            if (!VEHICLES[vehicle]) {
+                return;
+            }
+
+
+            const card =
+                document.createElement(
+                    "div"
+                );
+
+
+            card.className =
+                "vehicleCard";
+
+
+            if (
+                selectedVehicle ===
+                vehicle
+            ) {
+
+                card.classList.add(
+                    "selected"
+                );
+
+            }
+
+
+            card.innerHTML = `
+
+                <div class="vehicleIcon">
+                    ${VEHICLES[vehicle].icon}
+                </div>
+
+                <div class="vehicleName">
+                    ${VEHICLES[vehicle].name}
+                </div>
+
+                <button>
+                    ${
+                        selectedVehicle === vehicle
+                            ? "✓ Sélectionné"
+                            : "Choisir"
+                    }
+                </button>
+
+            `;
+
+
+            card
+                .querySelector(
+                    "button"
+                )
+                .addEventListener(
+                    "click",
+                    () => {
+
+                        selectVehicle(
+                            vehicle
+                        );
+
+                    }
+                );
+
+
+            container.appendChild(
+                card
+            );
+
+        }
+    );
+
+
+    const selectedText =
+        document.getElementById(
+            "selectedVehicleText"
+        );
+
+
+    if (selectedText) {
+
+        const vehicle =
+            VEHICLES[
+                selectedVehicle
+            ];
+
+
+        selectedText.textContent =
+            "Véhicule sélectionné : " +
+            (
+                vehicle
+                    ? vehicle.icon +
+                      " " +
+                      vehicle.name
+                    : selectedVehicle
+            );
+
+    }
+
+}
+
+
+// =========================================================
+// MAGASIN
+// =========================================================
+
+function updateShopUI() {
+
+    const container =
+        document.getElementById(
+            "shopVehicles"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    container.innerHTML = "";
+
+
+    const owned =
+        currentUser?.vehicles ||
+        [];
+
+
+    Object.keys(
+        VEHICLES
+    ).forEach(
+        vehicle => {
+
+            const card =
+                document.createElement(
+                    "div"
+                );
+
+
+            card.className =
+                "vehicleCard";
+
+
+            const isOwned =
+                owned.includes(
+                    vehicle
+                );
+
+
+            card.innerHTML = `
+
+                <div class="vehicleIcon">
+                    ${VEHICLES[vehicle].icon}
+                </div>
+
+                <div class="vehicleName">
+                    ${VEHICLES[vehicle].name}
+                </div>
+
+                <div class="vehiclePrice">
+                    ${
+                        isOwned
+                            ? "Déjà possédé"
+                            : "Disponible"
+                    }
+                </div>
+
+                ${
+                    isOwned
+                        ? ""
+                        : `
+                            <button>
+                                Acheter
+                            </button>
+                        `
+                }
+
+            `;
+
+
+            if (!isOwned) {
+
+                card
+                    .querySelector(
+                        "button"
+                    )
+                    .addEventListener(
+                        "click",
+                        () => {
+
+                            buyVehicle(
+                                vehicle
+                            );
+
+                        }
+                    );
+
+            }
+
+
+            container.appendChild(
+                card
+            );
+
+        }
+    );
+
+}
+
+
+// =========================================================
+// AMIS
+// =========================================================
+
+function updateFriendsUI() {
+
+    if (!currentUser) {
+        return;
+    }
+
+
+    const requests =
+        document.getElementById(
+            "friendRequestsList"
+        );
+
+
+    const friends =
+        document.getElementById(
+            "friendsList"
+        );
+
+
+    if (requests) {
+
+        requests.innerHTML = "";
+
+
+        const list =
+            currentUser.friendRequests ||
+            [];
+
+
+        if (!list.length) {
+
+            requests.innerHTML =
+                `<p class="emptyText">
+                    Aucune demande.
+                </p>`;
+
+        } else {
+
+            list.forEach(
+                userId => {
+
+                    const item =
+                        document.createElement(
+                            "div"
+                        );
+
+
+                    item.className =
+                        "requestItem";
+
+
+                    item.innerHTML = `
+
+                        <span>
+                            Demande d'ami
+                        </span>
+
+                        <button>
+                            Accepter
+                        </button>
+
+                    `;
+
+
+                    item
+                        .querySelector(
+                            "button"
+                        )
+                        .addEventListener(
+                            "click",
+                            () => {
+
+                                send({
+
+                                    type:
+                                        "friend_accept",
+
+                                    userId
+
+                                });
+
+                            }
+                        );
+
+
+                    requests.appendChild(
+                        item
+                    );
+
+                }
+            );
+
+        }
+
+    }
+
+
+    if (friends) {
+
+        friends.innerHTML = "";
+
+
+        const list =
+            currentUser.friends ||
+            [];
+
+
+        if (!list.length) {
+
+            friends.innerHTML =
+                `<p class="emptyText">
+                    Tu n'as pas encore d'amis.
+                </p>`;
+
+        } else {
+
+            list.forEach(
+                userId => {
+
+                    const item =
+                        document.createElement(
+                            "div"
+                        );
+
+
+                    item.className =
+                        "friendItem";
+
+
+                    item.innerHTML = `
+
+                        <span class="friendName">
+                            Ami
+                        </span>
+
+                    `;
+
+
+                    friends.appendChild(
+                        item
+                    );
+
+                }
+            );
+
+        }
+
+    }
+
+}
+
+
+// =========================================================
+// ROOM UI
+// =========================================================
+
+let roomPlayers = [];
+
+
+function updateRoomUI(
+    data
+) {
+
+    roomPlayers =
+        data.players ||
+        [];
+
+
+    const code =
+        document.getElementById(
+            "currentRoomCode"
+        );
+
+
+    if (code) {
+
+        code.textContent =
+            data.room ||
+            "------";
+
+    }
+
+
+    updatePlayersList();
+
+}
+
+
+function updatePlayersList() {
+
+    const container =
+        document.getElementById(
+            "playersList"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    container.innerHTML = "";
+
+
+    const players =
+        roomPlayers;
+
+
+    players.forEach(
+        player => {
+
+            const item =
+                document.createElement(
+                    "div"
+                );
+
+
+            item.className =
+                "playerItem";
+
+
+            item.innerHTML = `
+
+                <span class="playerName">
+                    ${
+                        player.name ||
+                        "Joueur"
+                    }
+                </span>
+
+                <span>
+                    ${
+                        VEHICLES[
+                            player.vehicle
+                        ]?.icon ||
+                        "🚗"
+                    }
+                </span>
+
+            `;
+
+
+            container.appendChild(
+                item
+            );
+
+        }
+    );
+
+}
+
+
+// =========================================================
+// INTERFACE
+// =========================================================
+
+function showAuthScreen() {
+
+    closeAllScreens();
+
+    document
+        .getElementById(
+            "authScreen"
+        )
+        ?.classList.remove(
+            "hidden"
+        );
+
+}
+
+
+function showMainMenu() {
+
+    closeAllScreens();
+
+    document
+        .getElementById(
+            "mainMenu"
+        )
+        ?.classList.remove(
+            "hidden"
+        );
+
+
+    updateUserInterface();
+
+}
+
+
+function updateUserInterface() {
+
+    const welcome =
+        document.getElementById(
+            "welcomeText"
+        );
+
+
+    if (welcome) {
+
+        welcome.textContent =
+            currentUser
+                ? "Bonjour " +
+                  currentUser.username
+                : "Joueur";
+
+    }
+
+}
+
+
+function openScreen(
+    id
+) {
+
+    document
+        .getElementById(
+            id
+        )
+        ?.classList.remove(
+            "hidden"
+        );
+
+}
+
+
+function closeScreen(
+    id
+) {
+
+    document
+        .getElementById(
+            id
+        )
+        ?.classList.add(
+            "hidden"
+        );
+
+}
+
+
+function closeAllScreens() {
+
+    document
+        .querySelectorAll(
+            ".screen"
+        )
+        .forEach(
+            element => {
+
+                element.classList.add(
+                    "hidden"
+                );
+
+            }
+        );
+
+}
+
+
+// =========================================================
+// NOTIFICATIONS
+// =========================================================
+
+function showNotification(
+    text
+) {
+
+    const container =
+        document.getElementById(
+            "notifications"
+        );
+
+
+    if (!container) {
+        return;
+    }
+
+
+    const notification =
+        document.createElement(
+            "div"
+        );
+
+
+    notification.className =
+        "notification";
+
+
+    notification.textContent =
+        text;
+
+
+    container.appendChild(
+        notification
+    );
+
+
+    setTimeout(
+        () => {
+
+            notification.remove();
+
+        },
+        3000
+    );
+
+}
+
+
+// =========================================================
+// MESSAGES
+// =========================================================
+
+function setMessage(
+    id,
+    text
+) {
+
+    const element =
+        document.getElementById(
+            id
+        );
+
+
+    if (element) {
+
+        element.textContent =
+            text;
+
+    }
+
+}
+
+
+function setAuthMessage(
+    text
+) {
+
+    setMessage(
+        "authMessage",
+        text
+    );
+
+}
+
+
+function showErrorInCurrentScreen(
+    text
+) {
+
+    setMessage(
+        "multiplayerMessage",
+        text
+    );
+
+}
+
+
+// =========================================================
+// BOUTONS
+// =========================================================
+
+function setupButtons() {
+
+    // Auth
+
+    document
+        .getElementById(
+            "loginButton"
+        )
+        ?.addEventListener(
+            "click",
+            login
+        );
+
+
+    document
+        .getElementById(
+            "registerButton"
+        )
+        ?.addEventListener(
+            "click",
+            register
+        );
+
+
+    document
+        .getElementById(
+            "guestButton"
+        )
+        ?.addEventListener(
+            "click",
+            playGuest
+        );
+
+
+    // Menu
+
+    document
+        .getElementById(
+            "playButton"
+        )
+        ?.addEventListener(
+            "click",
+            startGame
+        );
+
+
+    document
+        .getElementById(
+            "quickMatchButton"
+        )
+        ?.addEventListener(
+            "click",
+            startQuickMatch
+        );
+
+
+    document
+        .getElementById(
+            "quickMatchButton2"
+        )
+        ?.addEventListener(
+            "click",
+            startQuickMatch
+        );
+
+
+    document
+        .getElementById(
+            "multiplayerButton"
+        )
+        ?.addEventListener(
+            "click",
+            () =>
+                openScreen(
+                    "multiplayerScreen"
+                )
+        );
+
+
+    document
+        .getElementById(
+            "garageButton"
+        )
+        ?.addEventListener(
+            "click",
+            () => {
+
+                updateGarageUI();
+
+                openScreen(
+                    "garageScreen"
+                );
+
+            }
+        );
+
+
+    document
+        .getElementById(
+            "shopButton"
+        )
+        ?.addEventListener(
+            "click",
+            () => {
+
+                updateShopUI();
+
+                openScreen(
+                    "shopScreen"
+                );
+
+            }
+        );
+
+
+    document
+        .getElementById(
+            "friendsButton"
+        )
+        ?.addEventListener(
+            "click",
+            () => {
+
+                updateFriendsUI();
+
+                openScreen(
+                    "friendsScreen"
+                );
+
+            }
+        );
+
+
+    document
+        .getElementById(
+            "settingsButton"
+        )
+        ?.addEventListener(
+            "click",
+            () =>
+                openScreen(
+                    "settingsScreen"
+                )
+        );
+
+
+    // Multijoueur
+
+    document
+        .getElementById(
+            "createRoomButton"
+        )
+        ?.addEventListener(
+            "click",
+            createPublicRoom
+        );
+
+
+    document
+        .getElementById(
+            "createPrivateRoomButton"
+        )
+        ?.addEventListener(
+            "click",
+            () =>
+                openScreen(
+                    "privateRoomScreen"
+                )
+        );
+
+
+    document
+        .getElementById(
+            "confirmPrivateRoomButton"
+        )
+        ?.addEventListener(
+            "click",
+            createPrivateRoom
+        );
+
+
+    document
+        .getElementById(
+            "joinRoomButton"
+        )
+        ?.addEventListener(
+            "click",
+            joinRoom
+        );
+
+
+    // Salle
+
+    document
+        .getElementById(
+            "startRoomButton"
+        )
+        ?.addEventListener(
+            "click",
+            startGame
+        );
+
+
+    document
+        .getElementById(
+            "leaveRoomButton"
+        )
+        ?.addEventListener(
+            "click",
+            leaveRoom
+        );
+
+
+    // Amis
+
+    document
+        .getElementById(
+            "sendFriendRequestButton"
+        )
+        ?.addEventListener(
+            "click",
+            sendFriendRequest
+        );
+
+
+    // Paramètres
+
+    document
+        .getElementById(
+            "changeUsernameButton"
+        )
+        ?.addEventListener(
+            "click",
+            () =>
+                openScreen(
+                    "usernameScreen"
+                )
+        );
+
+
+    document
+        .getElementById(
+            "confirmUsernameButton"
+        )
+        ?.addEventListener(
+            "click",
+            changeUsername
+        );
+
+
+    document
+        .getElementById(
+            "logoutButton"
+        )
+        ?.addEventListener(
+            "click",
+            logout
+        );
+
+
+    document
+        .getElementById(
+            "soundToggle"
+        )
+        ?.addEventListener(
+            "change",
+            updateSettings
+        );
+
+
+    document
+        .getElementById(
+            "musicToggle"
+        )
+        ?.addEventListener(
+            "change",
+            updateSettings
+        );
+
+
+    // Véhicule
+
+    document
+        .getElementById(
+            "enterVehicleButton"
+        )
+        ?.addEventListener(
+            "click",
+            enterVehicle
+        );
+
+
+    document
+        .getElementById(
+            "exitVehicleButton"
+        )
+        ?.addEventListener(
+            "click",
+            exitVehicle
+        );
+
+
+    document
+        .getElementById(
+            "spawnVehicleButton"
+        )
+        ?.addEventListener(
+            "click",
+            useSelectedVehicle
+        );
+
+
+    // Carte
+
+    document
+        .getElementById(
+            "mapButton"
+        )
+        ?.addEventListener(
+            "click",
+            openMap
+        );
+
+
+    document
+        .getElementById(
+            "closeMapButton"
+        )
+        ?.addEventListener(
+            "click",
+            () =>
+                closeScreen(
+                    "mapScreen"
+                )
+        );
+
+
+    // Pause
+
+    document
+        .getElementById(
+            "menuGameButton"
+        )
+        ?.addEventListener(
+            "click",
+            pauseGame
+        );
+
+
+    document
+        .getElementById(
+            "resumeButton"
+        )
+        ?.addEventListener(
+            "click",
+            resumeGame
+        );
+
+
+    document
+        .getElementById(
+            "exitGameButton"
+        )
+        ?.addEventListener(
+            "click",
+            exitGame
+        );
+
+
+    // Fermer les écrans
+
+    document
+        .querySelectorAll(
+            "[data-close]"
+        )
+        .forEach(
+            button => {
+
+                button.addEventListener(
+                    "click",
+                    () => {
+
+                        closeScreen(
+                            button.dataset.close
+                        );
+
+                    }
+                );
+
+            }
+        );
+
+}
+
+
+// =========================================================
+// AMI
+// =========================================================
+
+function sendFriendRequest() {
+
+    const input =
+        document.getElementById(
+            "friendUsernameInput"
+        );
+
+
+    const username =
+        input?.value.trim();
+
+
+    if (!username) {
+
+        return;
+
+    }
+
+
+    send({
+
+        type:
+            "friend_request",
+
+        username
+
+    });
+
+
+    if (input) {
+
+        input.value = "";
+
+    }
+
+}
+
+
+// =========================================================
+// PSEUDO
+// =========================================================
+
+function changeUsername() {
+
+    const input =
+        document.getElementById(
+            "newUsernameInput"
+        );
+
+
+    const username =
+        input?.value.trim();
+
+
+    if (!username) {
+
+        setMessage(
+            "usernameMessage",
+            "Entre un pseudo."
+        );
+
+        return;
+
+    }
+
+
+    send({
+
+        type:
+            "change_username",
+
+        username
+
+    });
+
+}
+
+
+// =========================================================
+// PARAMÈTRES
+// =========================================================
+
+function updateSettings() {
+
+    send({
+
+        type:
+            "settings_update",
+
+        sound:
+            document.getElementById(
+                "soundToggle"
+            )?.checked ?? true,
+
+        music:
+            document.getElementById(
+                "musicToggle"
+            )?.checked ?? true
+
+    });
+
+}
+
+
+// =========================================================
+// DÉCONNEXION
+// =========================================================
+
+function logout() {
+
+    currentUser = null;
+
+    currentRoom = null;
+
+    currentPlayerId = null;
+
+    isPlaying = false;
+
+
+    showAuthScreen();
+
+}
+
+
+// =========================================================
+// QUITTER SALLE
+// =========================================================
+
+function leaveRoom() {
+
+    currentRoom = null;
+
+    currentPlayerId = null;
+
+
+    showMainMenu();
+
+}
+
+
+// =========================================================
+// PAUSE
+// =========================================================
+
+function pauseGame() {
+
+    if (!isPlaying) {
+        return;
+    }
+
+
+    isPaused = true;
+
+
+    openScreen(
+        "pauseScreen"
+    );
+
+}
+
+
+function resumeGame() {
+
+    isPaused = false;
+
+
+    closeScreen(
+        "pauseScreen"
+    );
+
+}
+
+
+// =========================================================
+// CARTE
+// =========================================================
+
+function openMap() {
+
+    openScreen(
+        "mapScreen"
+    );
+
+
+    drawMap();
+
+}
+
+
+function drawMap() {
+
+    const canvas =
+        document.getElementById(
+            "mapCanvas"
+        );
+
+
+    if (!canvas) {
+        return;
+    }
+
+
+    const ctx =
+        canvas.getContext(
+            "2d"
+        );
+
+
+    canvas.width =
+        window.innerWidth;
+
+
+    canvas.height =
+        window.innerHeight;
+
+
+    ctx.fillStyle =
+        "#d6d6d6";
+
+
+    ctx.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+
+    const gridSize =
+        80;
+
+
+    ctx.strokeStyle =
+        "#999";
+
+
+    ctx.lineWidth =
+        2;
+
+
+    for (
+        let x = 0;
+        x < canvas.width;
+        x += gridSize
+    ) {
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            x,
+            0
+        );
+
+        ctx.lineTo(
+            x,
+            canvas.height
+        );
+
+        ctx.stroke();
+
+    }
+
+
+    for (
+        let y = 0;
+        y < canvas.height;
+        y += gridSize
+    ) {
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            0,
+            y
+        );
+
+        ctx.lineTo(
+            canvas.width,
+            y
+        );
+
+        ctx.stroke();
+
+    }
+
+
+    // Joueur
+
+    ctx.fillStyle =
+        "#1677ff";
+
+
+    ctx.beginPath();
+
+
+    ctx.arc(
+        canvas.width / 2,
+        canvas.height / 2,
+        10,
+        0,
+        Math.PI * 2
+    );
+
+
+    ctx.fill();
+
+
+    ctx.fillStyle =
+        "#111";
+
+
+    ctx.font =
+        "bold 15px Arial";
+
+
+    ctx.textAlign =
+        "center";
+
+
+    ctx.fillText(
+        "Vous",
+        canvas.width / 2,
+        canvas.height / 2 - 18
+    );
+
+}
+
+
+// =========================================================
+// CLAVIER
+// =========================================================
+
+function setupKeyboard() {
+
+    window.addEventListener(
+        "keydown",
+        event => {
+
+            switch (
+                event.key.toLowerCase()
+            ) {
+
+                case "z":
+                case "arrowup":
+                    controls.forward = true;
+                    break;
+
+                case "s":
+                case "arrowdown":
+                    controls.backward = true;
+                    break;
+
+                case "q":
+                case "arrowleft":
+                    controls.left = true;
+                    break;
+
+                case "d":
+                case "arrowright":
+                    controls.right = true;
+                    break;
+
+                case "e":
+                    if (
+                        inVehicle
+                    ) {
+                        exitVehicle();
+                    } else {
+                        enterVehicle();
+                    }
+                    break;
+
+            }
+
+        }
+    );
+
+
+    window.addEventListener(
+        "keyup",
+        event => {
+
+            switch (
+                event.key.toLowerCase()
+            ) {
+
+                case "z":
+                case "arrowup":
+                    controls.forward = false;
+                    break;
+
+                case "s":
+                case "arrowdown":
+                    controls.backward = false;
+                    break;
+
+                case "q":
+                case "arrowleft":
+                    controls.left = false;
+                    break;
+
+                case "d":
+                case "arrowright":
+                    controls.right = false;
+                    break;
+
+            }
+
+        }
+    );
+
+}
+
+
+// =========================================================
+// JOYSTICK
+// =========================================================
+
+function setupTouchControls() {
+
+    const joystick =
+        document.getElementById(
+            "joystick"
+        );
+
+
+    const stick =
+        document.getElementById(
+            "joystickStick"
+        );
+
+
+    if (!joystick || !stick) {
+        return;
+    }
+
+
+    joystick.addEventListener(
+        "touchstart",
+        event => {
+
+            event.preventDefault();
+
+
+            const touch =
+                event.changedTouches[0];
+
+
+            joystickActive = true;
+
+            joystickTouchId =
+                touch.identifier;
+
+
+            updateJoystick(
+                touch
+            );
+
+        },
+        {
+            passive: false
+        }
+    );
+
+
+    joystick.addEventListener(
+        "touchmove",
+        event => {
+
+            event.preventDefault();
+
+
+            for (
+                const touch
+                of event.changedTouches
+            ) {
+
+                if (
+                    touch.identifier ===
+                    joystickTouchId
+                ) {
+
+                    updateJoystick(
+                        touch
+                    );
+
+                }
+
+            }
+
+        },
+        {
+            passive: false
+        }
+    );
+
+
+    joystick.addEventListener(
+        "touchend",
+        event => {
+
+            event.preventDefault();
+
+
+            for (
+                const touch
+                of event.changedTouches
+            ) {
+
+                if (
+                    touch.identifier ===
+                    joystickTouchId
+                ) {
+
+                    joystickActive =
+                        false;
+
+                    joystickTouchId =
+                        null;
+
+                    joystickX =
+                        0;
+
+                    joystickY =
+                        0;
+
+
+                    stick.style.transform =
+                        "translate(0px, 0px)";
+
+                }
+
+            }
+
+        },
+        {
+            passive: false
+        }
+    );
+
+}
 
 
 function updateJoystick(
     touch
 ) {
+
+    const joystick =
+        document.getElementById(
+            "joystick"
+        );
+
+
+    const stick =
+        document.getElementById(
+            "joystickStick"
+        );
+
 
     const rect =
         joystick.getBoundingClientRect();
@@ -1623,2387 +4088,163 @@ function updateJoystick(
 
     const max =
         rect.width / 2 -
-        32;
+        30;
 
 
-    const length =
-        Math.sqrt(
-            dx * dx +
-            dy * dy
+    const distance =
+        Math.hypot(
+            dx,
+            dy
         );
 
 
     if (
-        length > max
+        distance > max
     ) {
 
         dx =
-            dx / length *
+            dx /
+            distance *
             max;
-
 
         dy =
-            dy / length *
+            dy /
+            distance *
             max;
+
     }
+
+
+    joystickX =
+        dx / max;
+
+
+    joystickY =
+        dy / max;
 
 
     stick.style.transform =
         `translate(${dx}px, ${dy}px)`;
 
-
-    moveX =
-        dx / max;
-
-
-    moveY =
-        dy / max;
 }
 
 
-function resetJoystick() {
-
-    joystickActive =
-        false;
-
-
-    moveX = 0;
-
-    moveY = 0;
-
-
-    stick.style.transform =
-        "translate(0,0)";
-}
-
-
-// ============================================================
-// CAMÉRA AU DOIGT
-// ============================================================
-
-document.addEventListener(
-    "touchstart",
-    event => {
-
-        if (
-            event.target.closest(
-                "#joystick"
-            ) ||
-            event.target.closest(
-                "#miniMap"
-            ) ||
-            event.target.closest(
-                "#fullscreenMap"
-            )
-        ) {
-
-            return;
-        }
-
-
-        if (
-            event.touches.length === 1
-        ) {
-
-            lastTouchX =
-                event.touches[0].clientX;
-        }
-
-    },
-    {
-        passive: true
-    }
-);
-
-
-document.addEventListener(
-    "touchmove",
-    event => {
-
-        if (
-            event.target.closest(
-                "#joystick"
-            ) ||
-            event.target.closest(
-                "#fullscreenMap"
-            )
-        ) {
-
-            return;
-        }
-
-
-        if (
-            event.touches.length !== 1 ||
-            lastTouchX === null
-        ) {
-
-            return;
-        }
-
-
-        const x =
-            event.touches[0].clientX;
-
-
-        const delta =
-            x - lastTouchX;
-
-
-        cameraAngle -=
-            delta * 0.008;
-
-
-        lastTouchX =
-            x;
-
-
-        updateCamera();
-
-    },
-    {
-        passive: true
-    }
-);
-
-
-document.addEventListener(
-    "touchend",
-    () => {
-
-        lastTouchX =
-            null;
-
-    }
-);
-
-
-// ============================================================
-// DÉPLACEMENT
-// ============================================================
-
-function updatePlayer() {
-
-    if (!player)
-        return;
-
-
-    if (
-        Math.abs(moveX) < 0.05 &&
-        Math.abs(moveY) < 0.05
-    ) {
-
-        checkNearbyBuildings();
-
-        return;
-    }
-
-
-    let dx =
-        moveX;
-
-
-    let dz =
-        moveY;
-
-
-    const length =
-        Math.sqrt(
-            dx * dx +
-            dz * dz
-        );
-
-
-    if (
-        length > 1
-    ) {
-
-        dx /=
-            length;
-
-        dz /=
-            length;
-    }
-
-
-    const forwardX =
-        -Math.sin(
-            cameraAngle
-        );
-
-
-    const forwardZ =
-        -Math.cos(
-            cameraAngle
-        );
-
-
-    const rightX =
-        Math.cos(
-            cameraAngle
-        );
-
-
-    const rightZ =
-        -Math.sin(
-            cameraAngle
-        );
-
-
-    const worldX =
-        rightX * dx +
-        forwardX * (-dz);
-
-
-    const worldZ =
-        rightZ * dx +
-        forwardZ * (-dz);
-
-
-    const nextX =
-        player.position.x +
-        worldX * speed;
-
-
-    const nextZ =
-        player.position.z +
-        worldZ * speed;
-
-
-    // ========================================================
-    // COLLISION
-    // On teste séparément X et Z pour permettre de longer
-    // les murs au lieu de rester complètement bloqué.
-    // ========================================================
-
-    if (
-        !isColliding(
-            nextX,
-            player.position.z
-        )
-    ) {
-
-        player.position.x =
-            nextX;
-    }
-
-
-    if (
-        !isColliding(
-            player.position.x,
-            nextZ
-        )
-    ) {
-
-        player.position.z =
-            nextZ;
-    }
-
-
-    if (
-        Math.abs(worldX) > 0.01 ||
-        Math.abs(worldZ) > 0.01
-    ) {
-
-        player.rotation.y =
-            Math.atan2(
-                worldX,
-                worldZ
-            );
-    }
-
-
-    updateCamera();
-
-    drawMiniMap();
-
-    checkNearbyBuildings();
-
-    sendMultiplayerPosition();
-}
-
-
-// ============================================================
-// BÂTIMENT PROCHE
-// ============================================================
-
-function checkNearbyBuildings() {
-
-    if (!player)
-        return;
-
-
-    let closest =
-        null;
-
-
-    let closestDistance =
-        Infinity;
-
-
-    for (
-        const building of collisionBuildings
-    ) {
-
-        const centerX =
-            (
-                building.minX +
-                building.maxX
-            ) / 2;
-
-
-        const centerZ =
-            (
-                building.minZ +
-                building.maxZ
-            ) / 2;
-
-
-        const dx =
-            player.position.x -
-            centerX;
-
-
-        const dz =
-            player.position.z -
-            centerZ;
-
-
-        const distance =
-            Math.sqrt(
-                dx * dx +
-                dz * dz
-            );
-
-
-        if (
-            distance < closestDistance
-        ) {
-
-            closestDistance =
-                distance;
-
-            closest =
-                building;
-        }
-    }
-
-
-    if (
-        closest &&
-        closestDistance < 35
-    ) {
-
-        if (
-            nearbyBuilding !==
-            closest
-        ) {
-
-            nearbyBuilding =
-                closest;
-
-            showBuildingInfo(
-                closest
-            );
-
-            searchBuildingPhoto(
-                closest
-            );
-        }
-
-    } else {
-
-        nearbyBuilding =
-            null;
-
-        hideBuildingInfo();
-    }
-}
-
-
-// ============================================================
-// INFOS PHOTO
-// ============================================================
-
-function getBuildingName(
-    building
+// =========================================================
+// BOUTONS CONDUITE
+// =========================================================
+
+function holdButton(
+    id,
+    property
 ) {
 
-    const tags =
-        building.element.tags ||
-        {};
-
-
-    return (
-        tags.name ||
-        tags["official_name"] ||
-        tags["addr:housenumber"] ||
-        "Bâtiment"
-    );
-}
-
-
-function showBuildingInfo(
-    building
-) {
-
-    let panel =
+    const button =
         document.getElementById(
-            "buildingPhotoPanel"
+            id
         );
 
 
-    if (!panel) {
-
-        panel =
-            document.createElement(
-                "div"
-            );
-
-
-        panel.id =
-            "buildingPhotoPanel";
-
-
-        panel.style.position =
-            "fixed";
-
-        panel.style.left =
-            "50%";
-
-        panel.style.bottom =
-            "25px";
-
-        panel.style.transform =
-            "translateX(-50%)";
-
-        panel.style.width =
-            "min(90vw, 340px)";
-
-        panel.style.background =
-            "rgba(0,0,0,.88)";
-
-        panel.style.color =
-            "white";
-
-        panel.style.padding =
-            "12px";
-
-        panel.style.borderRadius =
-            "16px";
-
-        panel.style.zIndex =
-            "9999";
-
-        panel.style.display =
-            "none";
-
-        panel.style.fontFamily =
-            "Arial, sans-serif";
-
-
-        document.body.appendChild(
-            panel
-        );
-    }
-
-
-    panel.style.display =
-        "block";
-
-
-    panel.innerHTML = `
-
-        <div style="
-            font-size:17px;
-            font-weight:bold;
-            margin-bottom:8px;
-        ">
-            🏢 ${escapeHTML(
-                getBuildingName(
-                    building
-                )
-            )}
-        </div>
-
-        <div id="buildingPhotoContent">
-
-            <div style="
-                opacity:.8;
-                font-size:14px;
-            ">
-                🔎 Recherche d'une photo...
-            </div>
-
-        </div>
-
-    `;
-}
-
-
-function hideBuildingInfo() {
-
-    const panel =
-        document.getElementById(
-            "buildingPhotoPanel"
-        );
-
-
-    if (panel) {
-
-        panel.style.display =
-            "none";
-    }
-}
-
-
-// ============================================================
-// RECHERCHE PHOTO WIKIMEDIA
-// ============================================================
-
-async function searchBuildingPhoto(
-    building
-) {
-
-    if (
-        photoRequestRunning
-    ) {
-
+    if (!button) {
         return;
     }
 
 
-    const tags =
-        building.element.tags ||
-        {};
+    const start =
+        event => {
 
+            event.preventDefault();
 
-    const name =
-        tags.name ||
-        tags["official_name"] ||
-        "";
-
-
-    if (!name) {
-
-        setPhotoMessage(
-            "📍 Ce bâtiment n'a pas encore de photo publique trouvée."
-        );
-
-        return;
-    }
-
-
-    photoRequestRunning =
-        true;
-
-
-    try {
-
-        const query =
-            encodeURIComponent(
-                name
-            );
-
-
-        const url =
-            WIKIMEDIA_API +
-            "?action=query" +
-            "&generator=search" +
-            "&gsrsearch=" +
-            query +
-            "&gsrnamespace=6" +
-            "&gsrlimit=5" +
-            "&prop=imageinfo" +
-            "&iiprop=url" +
-            "&iiurlwidth=500" +
-            "&format=json" +
-            "&origin=*";
-
-
-        const response =
-            await fetch(
-                url
-            );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                "Recherche photo impossible"
-            );
-        }
-
-
-        const data =
-            await response.json();
-
-
-        const pages =
-            data.query &&
-            data.query.pages;
-
-
-        if (!pages) {
-
-            setPhotoMessage(
-                "📷 Aucune photo publique trouvée."
-            );
-
-            return;
-        }
-
-
-        const first =
-            Object.values(
-                pages
-            )[0];
-
-
-        if (
-            !first ||
-            !first.imageinfo ||
-            !first.imageinfo[0]
-        ) {
-
-            setPhotoMessage(
-                "📷 Aucune photo publique trouvée."
-            );
-
-            return;
-        }
-
-
-        const image =
-            first.imageinfo[0];
-
-
-        const imageUrl =
-            image.thumburl ||
-            image.url;
-
-
-        building.photo =
-            imageUrl;
-
-
-        setPhotoImage(
-            imageUrl
-        );
-
-
-    } catch (error) {
-
-        console.warn(
-            "Photo:",
-            error
-        );
-
-
-        setPhotoMessage(
-            "📷 Aucune photo publique trouvée."
-        );
-
-    } finally {
-
-        photoRequestRunning =
-            false;
-    }
-}
-
-
-function setPhotoMessage(
-    text
-) {
-
-    const content =
-        document.getElementById(
-            "buildingPhotoContent"
-        );
-
-
-    if (!content)
-        return;
-
-
-    content.innerHTML = `
-
-        <div style="
-            font-size:14px;
-            opacity:.85;
-        ">
-            ${escapeHTML(text)}
-        </div>
-
-    `;
-}
-
-
-function setPhotoImage(
-    imageUrl
-) {
-
-    const content =
-        document.getElementById(
-            "buildingPhotoContent"
-        );
-
-
-    if (!content)
-        return;
-
-
-    content.innerHTML = `
-
-        <img
-            src="${escapeAttribute(
-                imageUrl
-            )}"
-            style="
-                width:100%;
-                max-height:220px;
-                object-fit:cover;
-                border-radius:12px;
-                display:block;
-            "
-            loading="lazy"
-            onerror="
-                this.style.display='none';
-                this.nextElementSibling.style.display='block';
-            "
-        >
-
-        <div style="
-            display:none;
-            padding:10px 0;
-            font-size:14px;
-        ">
-            📷 Photo indisponible.
-        </div>
-
-        <div style="
-            margin-top:7px;
-            font-size:11px;
-            opacity:.65;
-        ">
-            Photo provenant de Wikimedia Commons.
-        </div>
-
-    `;
-}
-
-
-// ============================================================
-// SÉCURITÉ HTML
-// ============================================================
-
-function escapeHTML(
-    text
-) {
-
-    return String(text)
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
-}
-
-
-function escapeAttribute(
-    text
-) {
-
-    return String(text)
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        );
-}
-
-
-// ============================================================
-// MINI-CARTE
-// ============================================================
-
-miniMap.addEventListener(
-    "click",
-    openFullMap
-);
-
-
-function resizeMaps() {
-
-    const dpr =
-        Math.min(
-            devicePixelRatio,
-            2
-        );
-
-
-    miniCanvas.width =
-        miniCanvas.clientWidth *
-        dpr;
-
-
-    miniCanvas.height =
-        miniCanvas.clientHeight *
-        dpr;
-
-
-    fullCanvas.width =
-        fullCanvas.clientWidth *
-        dpr;
-
-
-    fullCanvas.height =
-        fullCanvas.clientHeight *
-        dpr;
-}
-
-
-function drawMiniMap() {
-
-    if (!gameStarted)
-        return;
-
-
-    drawMap(
-        miniCanvas
-    );
-}
-
-
-function drawFullMap() {
-
-    drawMap(
-        fullCanvas
-    );
-}
-
-
-// ============================================================
-// TUILE SATELLITE
-// ============================================================
-
-function latLonToTile(
-    lat,
-    lon,
-    zoom
-) {
-
-    const latRad =
-        lat *
-        Math.PI /
-        180;
-
-
-    const n =
-        Math.pow(
-            2,
-            zoom
-        );
-
-
-    const x =
-        (
-            lon + 180
-        ) /
-        360 *
-        n;
-
-
-    const y =
-        (
-            1 -
-            Math.asinh(
-                Math.tan(
-                    latRad
-                )
-            ) /
-            Math.PI
-        ) /
-        2 *
-        n;
-
-
-    return {
-        x,
-        y
-    };
-}
-
-
-function drawSatelliteBackground(
-    ctx,
-    width,
-    height,
-    scale
-) {
-
-    if (
-        canvasIsMiniMap(
-            ctx
-        )
-    ) {
-
-        return;
-    }
-
-
-    const zoom =
-        getSatelliteZoom(
-            scale
-        );
-
-
-    const center =
-        latLonToTile(
-            centerLat,
-            centerLon,
-            zoom
-        );
-
-
-    const tileSize =
-        256;
-
-
-    const centerPixelX =
-        center.x *
-        tileSize;
-
-
-    const centerPixelY =
-        center.y *
-        tileSize;
-
-
-    const startX =
-        centerPixelX -
-        width / 2 -
-        512;
-
-
-    const startY =
-        centerPixelY -
-        height / 2 -
-        512;
-
-
-    const endX =
-        centerPixelX +
-        width / 2 +
-        512;
-
-
-    const endY =
-        centerPixelY +
-        height / 2 +
-        512;
-
-
-    const firstTileX =
-        Math.floor(
-            startX /
-            tileSize
-        );
-
-
-    const firstTileY =
-        Math.floor(
-            startY /
-            tileSize
-        );
-
-
-    const lastTileX =
-        Math.floor(
-            endX /
-            tileSize
-        );
-
-
-    const lastTileY =
-        Math.floor(
-            endY /
-            tileSize
-        );
-
-
-    const maxTile =
-        Math.pow(
-            2,
-            zoom
-        );
-
-
-    for (
-        let tx = firstTileX;
-        tx <= lastTileX;
-        tx++
-    ) {
-
-        for (
-            let ty = firstTileY;
-            ty <= lastTileY;
-            ty++
-        ) {
-
-            const wrappedX =
-                (
-                    tx %
-                    maxTile +
-                    maxTile
-                ) %
-                maxTile;
-
-
-            if (
-                ty < 0 ||
-                ty >= maxTile
-            ) {
-
-                continue;
-            }
-
-
-            const image =
-                new Image();
-
-
-            image.crossOrigin =
-                "anonymous";
-
-
-            image.src =
-                SATELLITE_URL +
-                "/" +
-                zoom +
-                "/" +
-                ty +
-                "/" +
-                wrappedX;
-
-
-            const drawX =
-                tx *
-                tileSize -
-                centerPixelX +
-                width / 2;
-
-
-            const drawY =
-                ty *
-                tileSize -
-                centerPixelY +
-                height / 2;
-
-
-            image.onload =
-                () => {
-
-                    if (
-                        !gameStarted
-                    )
-                        return;
-
-
-                    ctx.drawImage(
-                        image,
-                        drawX,
-                        drawY,
-                        tileSize,
-                        tileSize
-                    );
-
-
-                    drawMapOverlays(
-                        ctx
-                    );
-                };
-        }
-    }
-}
-
-
-function getSatelliteZoom(
-    scale
-) {
-
-    if (
-        scale < 0.015
-    ) {
-
-        return 15;
-    }
-
-
-    if (
-        scale < 0.035
-    ) {
-
-        return 16;
-    }
-
-
-    if (
-        scale < 0.07
-    ) {
-
-        return 17;
-    }
-
-
-    if (
-        scale < 0.15
-    ) {
-
-        return 18;
-    }
-
-
-    return 19;
-}
-
-
-function canvasIsMiniMap(
-    ctx
-) {
-
-    return (
-        ctx.canvas ===
-        miniCanvas
-    );
-}
-
-
-// ============================================================
-// CARTE
-// ============================================================
-
-function drawMap(
-    canvas
-) {
-
-    const ctx =
-        canvas.getContext(
-            "2d"
-        );
-
-
-    const width =
-        canvas.width;
-
-
-    const height =
-        canvas.height;
-
-
-    ctx.clearRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-
-    let centerX =
-        width / 2;
-
-
-    let centerY =
-        height / 2;
-
-
-    let scale;
-
-
-    if (
-        canvas === miniCanvas
-    ) {
-
-        scale =
-            0.20;
-
-
-        ctx.fillStyle =
-            "#d8d3c8";
-
-
-        ctx.fillRect(
-            0,
-            0,
-            width,
-            height
-        );
-
-
-        drawMapOverlays(
-            ctx,
-            scale,
-            centerX,
-            centerY
-        );
-
-
-    } else {
-
-        scale =
-            mapZoom;
-
-
-        centerX +=
-            mapOffsetX;
-
-
-        centerY +=
-            mapOffsetY;
-
-
-        drawSatelliteBackground(
-            ctx,
-            width,
-            height,
-            scale
-        );
-
-
-        drawMapOverlays(
-            ctx,
-            scale,
-            centerX,
-            centerY
-        );
-    }
-}
-
-
-// ============================================================
-// OVERLAYS CARTE
-// ============================================================
-
-function drawMapOverlays(
-    ctx,
-    forcedScale,
-    forcedCenterX,
-    forcedCenterY
-) {
-
-    const canvas =
-        ctx.canvas;
-
-
-    let centerX =
-        forcedCenterX ??
-        canvas.width / 2;
-
-
-    let centerY =
-        forcedCenterY ??
-        canvas.height / 2;
-
-
-    let scale =
-        forcedScale;
-
-
-    if (
-        scale === undefined
-    ) {
-
-        scale =
-            canvas === miniCanvas
-                ? 0.20
-                : mapZoom;
-    }
-
-
-    // --------------------------------------------------------
-    // BÂTIMENTS
-    // --------------------------------------------------------
-
-    for (
-        const element of worldData
-    ) {
-
-        if (
-            !element.geometry
-        ) {
-
-            continue;
-        }
-
-
-        const isBuilding =
-            element.tags &&
-            element.tags.building;
-
-
-        if (!isBuilding)
-            continue;
-
-
-        const points =
-            element.geometry.map(
-                point =>
-                    gpsToWorld(
-                        point.lat,
-                        point.lon
-                    )
-            );
-
-
-        if (
-            points.length < 3
-        ) {
-
-            continue;
-        }
-
-
-        ctx.beginPath();
-
-
-        points.forEach(
-            (point, index) => {
-
-                const x =
-                    centerX +
-                    point.x *
-                    scale;
-
-
-                const y =
-                    centerY +
-                    point.z *
-                    scale;
-
-
-                if (
-                    index === 0
-                ) {
-
-                    ctx.moveTo(
-                        x,
-                        y
-                    );
-
-                } else {
-
-                    ctx.lineTo(
-                        x,
-                        y
-                    );
-                }
-            }
-        );
-
-
-        ctx.closePath();
-
-
-        if (
-            canvas === miniCanvas
-        ) {
-
-            ctx.fillStyle =
-                "rgba(190,190,190,.65)";
-
-            ctx.strokeStyle =
-                "rgba(80,80,80,.8)";
-
-        } else {
-
-            ctx.fillStyle =
-                "rgba(255,255,255,.18)";
-
-            ctx.strokeStyle =
-                "rgba(255,255,255,.55)";
-        }
-
-
-        ctx.lineWidth =
-            canvas === miniCanvas
-                ? 1
-                : 1.5;
-
-
-        ctx.fill();
-
-        ctx.stroke();
-    }
-
-
-    // --------------------------------------------------------
-    // ROUTES PAR-DESSUS
-    // --------------------------------------------------------
-
-    for (
-        const element of worldData
-    ) {
-
-        if (
-            !element.geometry
-        ) {
-
-            continue;
-        }
-
-
-        const isRoad =
-            element.tags &&
-            element.tags.highway;
-
-
-        if (!isRoad)
-            continue;
-
-
-        const points =
-            element.geometry.map(
-                point =>
-                    gpsToWorld(
-                        point.lat,
-                        point.lon
-                    )
-            );
-
-
-        if (
-            points.length < 2
-        ) {
-
-            continue;
-        }
-
-
-        let roadWidth =
-            2;
-
-
-        if (
-            element.tags.highway ===
-            "primary"
-        ) {
-
-            roadWidth =
-                5;
-
-        } else if (
-            element.tags.highway ===
-            "secondary"
-        ) {
-
-            roadWidth =
-                4;
-
-        } else if (
-            element.tags.highway ===
-            "tertiary"
-        ) {
-
-            roadWidth =
-                3;
-
-        }
-
-
-        ctx.beginPath();
-
-
-        points.forEach(
-            (point, index) => {
-
-                const x =
-                    centerX +
-                    point.x *
-                    scale;
-
-
-                const y =
-                    centerY +
-                    point.z *
-                    scale;
-
-
-                if (
-                    index === 0
-                ) {
-
-                    ctx.moveTo(
-                        x,
-                        y
-                    );
-
-                } else {
-
-                    ctx.lineTo(
-                        x,
-                        y
-                    );
-                }
-            }
-        );
-
-
-        ctx.strokeStyle =
-            canvas === miniCanvas
-                ? "#555"
-                : "rgba(255,255,255,.92)";
-
-
-        ctx.lineWidth =
-            Math.max(
-                roadWidth,
-                canvas === miniCanvas
-                    ? 2
-                    : 3
-            );
-
-
-        ctx.lineCap =
-            "round";
-
-
-        ctx.lineJoin =
-            "round";
-
-
-        ctx.stroke();
-    }
-
-
-    // --------------------------------------------------------
-    // JOUEUR
-    // --------------------------------------------------------
-
-    if (player) {
-
-        const x =
-            centerX +
-            player.position.x *
-            scale;
-
-
-        const y =
-            centerY +
-            player.position.z *
-            scale;
-
-
-        const radius =
-            canvas === miniCanvas
-                ? 6
-                : 10;
-
-
-        ctx.beginPath();
-
-
-        ctx.arc(
-            x,
-            y,
-            radius,
-            0,
-            Math.PI * 2
-        );
-
-
-        ctx.fillStyle =
-            "#e51c23";
-
-
-        ctx.fill();
-
-
-        ctx.beginPath();
-
-
-        ctx.moveTo(
-            x,
-            y
-        );
-
-
-        ctx.lineTo(
-
-            x +
-            Math.sin(
-                player.rotation.y
-            ) *
-            18,
-
-            y +
-            Math.cos(
-                player.rotation.y
-            ) *
-            18
-
-        );
-
-
-        ctx.strokeStyle =
-            "#e51c23";
-
-
-        ctx.lineWidth =
-            3;
-
-
-        ctx.stroke();
-    }
-}
-
-
-// ============================================================
-// OUVRIR CARTE
-// ============================================================
-
-function openFullMap() {
-
-    if (!gameStarted)
-        return;
-
-
-    fullMap.style.display =
-        "block";
-
-
-    resizeMaps();
-
-
-    drawFullMap();
-}
-
-
-const closeMap =
-    document.getElementById(
-        "closeMap"
-    );
-
-
-if (closeMap) {
-
-    closeMap.addEventListener(
-        "click",
-        () => {
-
-            fullMap.style.display =
-                "none";
-
-        }
-    );
-}
-
-
-// ============================================================
-// PINCH ZOOM
-// ============================================================
-
-function getTouchDistance(
-    touch1,
-    touch2
-) {
-
-    const dx =
-        touch2.clientX -
-        touch1.clientX;
-
-
-    const dy =
-        touch2.clientY -
-        touch1.clientY;
-
-
-    return Math.sqrt(
-        dx * dx +
-        dy * dy
-    );
-}
-
-
-fullCanvas.addEventListener(
-    "touchstart",
-    event => {
-
-        event.preventDefault();
-
-
-        if (
-            event.touches.length === 1
-        ) {
-
-            mapDragging =
+            controls[property] =
                 true;
 
-
-            mapLastX =
-                event.touches[0].clientX;
+        };
 
 
-            mapLastY =
-                event.touches[0].clientY;
-        }
+    const end =
+        event => {
 
+            event.preventDefault();
 
-        if (
-            event.touches.length === 2
-        ) {
-
-            mapDragging =
+            controls[property] =
                 false;
 
-
-            mapPinching =
-                true;
+        };
 
 
-            mapStartDistance =
-                getTouchDistance(
-                    event.touches[0],
-                    event.touches[1]
-                );
-
-
-            mapStartZoom =
-                mapZoom;
+    button.addEventListener(
+        "touchstart",
+        start,
+        {
+            passive: false
         }
+    );
 
-    },
-    {
-        passive: false
-    }
+
+    button.addEventListener(
+        "touchend",
+        end,
+        {
+            passive: false
+        }
+    );
+
+
+    button.addEventListener(
+        "touchcancel",
+        end,
+        {
+            passive: false
+        }
+    );
+
+
+    button.addEventListener(
+        "mousedown",
+        start
+    );
+
+
+    button.addEventListener(
+        "mouseup",
+        end
+    );
+
+
+    button.addEventListener(
+        "mouseleave",
+        end
+    );
+
+}
+
+
+holdButton(
+    "accelerateButton",
+    "forward"
 );
 
 
-// ============================================================
-// MOUVEMENT CARTE
-// ============================================================
-
-fullCanvas.addEventListener(
-    "touchmove",
-    event => {
-
-        event.preventDefault();
-
-
-        if (
-            event.touches.length === 1 &&
-            mapDragging
-        ) {
-
-            const x =
-                event.touches[0].clientX;
-
-
-            const y =
-                event.touches[0].clientY;
-
-
-            mapOffsetX +=
-                x - mapLastX;
-
-
-            mapOffsetY +=
-                y - mapLastY;
-
-
-            mapLastX =
-                x;
-
-
-            mapLastY =
-                y;
-
-
-            drawFullMap();
-        }
-
-
-        if (
-            event.touches.length === 2 &&
-            mapPinching
-        ) {
-
-            const distance =
-                getTouchDistance(
-                    event.touches[0],
-                    event.touches[1]
-                );
-
-
-            const ratio =
-                distance /
-                mapStartDistance;
-
-
-            mapZoom =
-                mapStartZoom *
-                ratio;
-
-
-            mapZoom =
-                Math.max(
-                    0.005,
-                    Math.min(
-                        mapZoom,
-                        0.5
-                    )
-                );
-
-
-            drawFullMap();
-        }
-
-    },
-    {
-        passive: false
-    }
+holdButton(
+    "brakeButton",
+    "backward"
 );
 
 
-// ============================================================
-// FIN TOUCH CARTE
-// ============================================================
-
-fullCanvas.addEventListener(
-    "touchend",
-    event => {
-
-        if (
-            event.touches.length === 0
-        ) {
-
-            mapDragging =
-                false;
-
-            mapPinching =
-                false;
-        }
-
-
-        if (
-            event.touches.length === 1
-        ) {
-
-            mapPinching =
-                false;
-
-
-            mapDragging =
-                true;
-
-
-            mapLastX =
-                event.touches[0].clientX;
-
-
-            mapLastY =
-                event.touches[0].clientY;
-        }
-
-    },
-    {
-        passive: false
-    }
+holdButton(
+    "leftButton",
+    "left"
 );
 
 
-// ============================================================
-// MULTIJOUEUR
-// ============================================================
+holdButton(
+    "rightButton",
+    "right"
+);
 
-const multiMenu =
-    document.getElementById(
-        "multiMenu"
-    );
 
-
-if (multiMenu) {
-
-    multiMenu.addEventListener(
-        "click",
-        () => {
-
-            multi.style.display =
-                "flex";
-
-        }
-    );
-}
-
-
-const closeMulti =
-    document.getElementById(
-        "closeMulti"
-    );
-
-
-if (closeMulti) {
-
-    closeMulti.addEventListener(
-        "click",
-        () => {
-
-            multi.style.display =
-                "none";
-
-        }
-    );
-}
-
-
-const createRoom =
-    document.getElementById(
-        "createRoom"
-    );
-
-
-if (createRoom) {
-
-    createRoom.addEventListener(
-        "click",
-        () => {
-
-            const name =
-                document.getElementById(
-                    "playerName"
-                ).value.trim();
-
-
-            const code =
-                Math.random()
-                .toString(36)
-                .substring(
-                    2,
-                    8
-                )
-                .toUpperCase();
-
-
-            document.getElementById(
-                "roomCode"
-            ).value =
-                code;
-
-
-            document.getElementById(
-                "multiStatus"
-            ).textContent =
-                "🎮 Partie créée : " +
-                code;
-
-
-            connectMultiplayer(
-                name || "Joueur",
-                code
-            );
-        }
-    );
-}
-
-
-const joinRoom =
-    document.getElementById(
-        "joinRoom"
-    );
-
-
-if (joinRoom) {
-
-    joinRoom.addEventListener(
-        "click",
-        () => {
-
-            const name =
-                document.getElementById(
-                    "playerName"
-                ).value.trim();
-
-
-            const code =
-                document.getElementById(
-                    "roomCode"
-                ).value.trim();
-
-
-            if (!code) {
-
-                document.getElementById(
-                    "multiStatus"
-                ).textContent =
-                    "❌ Entre un code.";
-
-                return;
-            }
-
-
-            connectMultiplayer(
-                name || "Joueur",
-                code
-            );
-        }
-    );
-}
-
-
-// ============================================================
-// CONNEXION MULTI
-// ============================================================
-
-function connectMultiplayer(
-    name,
-    room
-) {
-
-    try {
-
-        const protocol =
-            location.protocol === "https:"
-                ? "wss:"
-                : "ws:";
-
-
-        multiplayerSocket =
-            new WebSocket(
-                protocol +
-                "//" +
-                location.host
-            );
-
-
-        multiplayerSocket.onopen =
-            () => {
-
-                multiplayerSocket.send(
-                    JSON.stringify({
-
-                        type: "join",
-
-                        name,
-
-                        room
-
-                    })
-                );
-
-
-                document.getElementById(
-                    "multiStatus"
-                ).textContent =
-                    "🟢 Connecté à la partie " +
-                    room;
-            };
-
-
-        multiplayerSocket.onmessage =
-            event => {
-
-                try {
-
-                    const data =
-                        JSON.parse(
-                            event.data
-                        );
-
-
-                    handleMultiplayerMessage(
-                        data
-                    );
-
-                } catch (error) {
-
-                    console.warn(
-                        "Message multi invalide",
-                        error
-                    );
-                }
-            };
-
-
-        multiplayerSocket.onerror =
-            () => {
-
-                document.getElementById(
-                    "multiStatus"
-                ).textContent =
-                    "⚠️ Le serveur multijoueur n'est pas configuré.";
-            };
-
-
-        multiplayerSocket.onclose =
-            () => {
-
-                document.getElementById(
-                    "multiStatus"
-                ).textContent =
-                    "🔴 Déconnecté.";
-            };
-
-
-    } catch (error) {
-
-        console.error(
-            error
-        );
-
-
-        document.getElementById(
-            "multiStatus"
-        ).textContent =
-            "⚠️ Multijoueur indisponible.";
-    }
-}
-
-
-// ============================================================
-// POSITION MULTI
-// ============================================================
-
-function sendMultiplayerPosition() {
-
-    if (
-        !multiplayerSocket ||
-        multiplayerSocket.readyState !==
-        WebSocket.OPEN ||
-        !player
-    ) {
-
-        return;
-    }
-
-
-    multiplayerSocket.send(
-        JSON.stringify({
-
-            type: "position",
-
-            x:
-                player.position.x,
-
-            z:
-                player.position.z,
-
-            rotation:
-                player.rotation.y
-
-        })
-    );
-}
-
-
-function handleMultiplayerMessage(
-    data
-) {
-
-    // Cette partie est volontairement compatible
-    // avec différents serveurs WebSocket.
-
-    if (
-        data.type === "players"
-    ) {
-
-        updateOtherPlayers(
-            data.players || []
-        );
-
-        return;
-    }
-
-
-    if (
-        data.type === "player"
-    ) {
-
-        updateOtherPlayers(
-            [data]
-        );
-    }
-}
-
-
-// ============================================================
-// JOUEURS DISTANTS
-// ============================================================
-
-const otherPlayers =
-    new Map();
-
-
-function updateOtherPlayers(
-    players
-) {
-
-    players.forEach(
-        remote => {
-
-            if (
-                !remote.id
-            ) {
-
-                return;
-            }
-
-
-            let remotePlayer =
-                otherPlayers.get(
-                    remote.id
-                );
-
-
-            if (!remotePlayer) {
-
-                remotePlayer =
-                    createRemotePlayer(
-                        remote.name
-                    );
-
-
-                otherPlayers.set(
-                    remote.id,
-                    remotePlayer
-                );
-            }
-
-
-            if (
-                Number.isFinite(
-                    remote.x
-                )
-            ) {
-
-                remotePlayer.position.x =
-                    remote.x;
-            }
-
-
-            if (
-                Number.isFinite(
-                    remote.z
-                )
-            ) {
-
-                remotePlayer.position.z =
-                    remote.z;
-            }
-
-
-            if (
-                Number.isFinite(
-                    remote.rotation
-                )
-            ) {
-
-                remotePlayer.rotation.y =
-                    remote.rotation;
-            }
-        }
-    );
-}
-
-
-function createRemotePlayer(
-    name
-) {
-
-    const group =
-        new THREE.Group();
-
-
-    const body =
-        new THREE.Mesh(
-
-            new THREE.BoxGeometry(
-                2.8,
-                1,
-                4.8
-            ),
-
-            new THREE.MeshStandardMaterial({
-                color: 0xff3030
-            })
-
-        );
-
-
-    body.position.y =
-        1;
-
-
-    group.add(
-        body
-    );
-
-
-    group.userData.name =
-        name;
-
-
-    scene.add(
-        group
-    );
-
-
-    return group;
-}
-
-
-// ============================================================
-// ANIMATION
-// ============================================================
-
-function animate() {
-
-    if (!gameStarted)
-        return;
-
-
-    requestAnimationFrame(
-        animate
-    );
-
-
-    updatePlayer();
-
-
-    renderer.render(
-        scene,
-        camera
-    );
-}
-
-
-// ============================================================
+// =========================================================
 // REDIMENSIONNEMENT
-// ============================================================
+// =========================================================
 
 window.addEventListener(
     "resize",
@@ -4015,37 +4256,19 @@ window.addEventListener(
         ) {
 
             camera.aspect =
-                innerWidth /
-                innerHeight;
+                window.innerWidth /
+                window.innerHeight;
 
 
             camera.updateProjectionMatrix();
 
 
             renderer.setSize(
-                innerWidth,
-                innerHeight
+                window.innerWidth,
+                window.innerHeight
             );
+
         }
 
-
-        resizeMaps();
-
-
-        drawMiniMap();
-
-
-        if (
-            fullMap.style.display ===
-            "block"
-        ) {
-
-            drawFullMap();
-        }
     }
 );
-
-
-// ============================================================
-// FIN
-// ============================================================
