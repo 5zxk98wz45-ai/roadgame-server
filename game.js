@@ -9,10 +9,7 @@
    CONFIGURATION SERVEUR
 ========================================================= */
 
-const SERVER_URL =
-    window.location.protocol === "https:"
-        ? "wss://roadgame-server.onrender.com"
-        : "ws://localhost:10000";
+const SERVER_URL = "wss://roadgame-server.onrender.com";
 
 
 /* =========================================================
