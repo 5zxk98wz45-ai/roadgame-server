@@ -2,107 +2,84 @@
 
 /* =========================================================
    ROADGAME V5
-   =========================================================
-   - Comptes
-   - Pseudo unique
-   - WebSocket Render
-   - Multijoueur
-   - Adresse / ville
-   - OpenStreetMap Nominatim
-   - Spawn aux coordonnées trouvées
-   - Carte
-   - Zoom
-   - Zoom tactile
-   - Véhicules
-   - Chargement non bloquant
 ========================================================= */
 
-
-/* =========================================================
-   SERVEUR
-========================================================= */
-
-const SERVER_URL =
-    "wss://roadgame-server.onrender.com";
-
-
-/* =========================================================
-   OPENSTREETMAP
-========================================================= */
+const SERVER_URL = "wss://roadgame-server.onrender.com";
 
 const NOMINATIM_URL =
     "https://nominatim.openstreetmap.org/search";
 
-
-/* =========================================================
-   VARIABLES
-========================================================= */
-
 let socket = null;
-
 let connected = false;
 let loggedIn = false;
 
 let currentUser = null;
-
 let currentRoom = null;
 let currentPlayerId = null;
 
-let players = {};
-
 let selectedVehicle = "car";
+
+let players = {};
 
 let gameStarted = false;
 
-let mapZoom = 1;
+let loadingProgress = 0;
 
-let mapLatitude = 48.8566;
-let mapLongitude = 2.3522;
+let spawnLocation = {
+    lat: 48.9625,
+    lon: 2.5275,
+    name: "Villepinte, France"
+};
 
-let spawnLatitude = 48.8566;
-let spawnLongitude = 2.3522;
+let map = null;
+let mapLoaded = false;
 
-let addressSearchTimer = null;
+let gameCanvas = null;
+let gameCtx = null;
 
-let loadingFinished = false;
+let player = {
+    x: 0,
+    y: 0,
+    angle: 0,
+    speed: 0,
+    vx: 0,
+    vy: 0
+};
+
+let joystick = {
+    active: false,
+    x: 0,
+    y: 0
+};
+
+let cameraAngle = 0;
+let cameraX = 0;
+let cameraY = 0;
+
+let lastFrame = 0;
 
 
 /* =========================================================
-   OUTILS
+   DOM
 ========================================================= */
 
 function $(id) {
     return document.getElementById(id);
 }
 
-
 function show(id) {
-
     const el = $(id);
-
-    if (el) {
-        el.classList.remove("hidden");
-    }
+    if (el) el.classList.remove("hidden");
 }
-
 
 function hide(id) {
-
     const el = $(id);
-
-    if (el) {
-        el.classList.add("hidden");
-    }
+    if (el) el.classList.add("hidden");
 }
 
-
 function setText(id, text) {
-
     const el = $(id);
-
-    if (el) {
-        el.textContent = text;
-    }
+    if (el) el.textContent = text;
 }
 
 
@@ -112,31 +89,36 @@ function setText(id, text) {
 
 function notify(message) {
 
-    const container =
-        $("notifications");
+    console.log(message);
 
-    if (!container) {
-        return;
-    }
-
-    const notification =
-        document.createElement("div");
-
-    notification.className =
-        "notification";
-
-    notification.textContent =
-        message;
-
-    container.appendChild(
-        notification
+    const old = document.querySelector(
+        ".roadgameNotification"
     );
 
-    setTimeout(() => {
+    if (old) old.remove();
 
-        notification.remove();
+    const box = document.createElement("div");
 
-    }, 3500);
+    box.className = "roadgameNotification";
+
+    box.textContent = message;
+
+    Object.assign(box.style, {
+        position: "fixed",
+        left: "50%",
+        top: "25px",
+        transform: "translateX(-50%)",
+        zIndex: "2000",
+        padding: "14px 20px",
+        background: "#10171b",
+        color: "white",
+        borderRadius: "15px",
+        boxShadow: "0 5px 20px rgba(0,0,0,.4)"
+    });
+
+    document.body.appendChild(box);
+
+    setTimeout(() => box.remove(), 3500);
 }
 
 
@@ -146,153 +128,124 @@ function notify(message) {
 
 function authMessage(message, success = false) {
 
-    const el =
-        $("authMessage");
+    const el = $("authMessage");
 
-    if (!el) {
-        return;
-    }
+    if (!el) return;
 
-    el.textContent =
-        message;
+    el.textContent = message;
 
     el.style.color =
-        success
-            ? "#36e875"
-            : "#ff5555";
+        success ? "#35e875" : "#ff6666";
 }
-
 
 function multiplayerMessage(message) {
-
-    setText(
-        "multiplayerMessage",
-        message
-    );
+    setText("multiplayerMessage", message);
 }
-
 
 function privateMessage(message) {
-
-    setText(
-        "privateRoomMessage",
-        message
-    );
+    setText("privateRoomMessage", message);
 }
 
-
 function usernameMessage(message) {
-
-    setText(
-        "usernameMessage",
-        message
-    );
+    setText("usernameMessage", message);
 }
 
 
 /* =========================================================
    CHARGEMENT
+   IMPORTANT :
+   LE JEU NE RESTE PAS BLOQUÉ EN ATTENDANT RENDER
 ========================================================= */
 
 function setLoadingProgress(value) {
 
-    const percent =
-        Math.max(
-            0,
-            Math.min(
-                100,
-                value
-            )
-        );
+    loadingProgress =
+        Math.max(0, Math.min(100, value));
 
-    const bar =
-        $("loadingProgressBar");
+    const bar = $("loadingProgress");
 
     if (bar) {
-
         bar.style.width =
-            percent + "%";
-
+            loadingProgress + "%";
     }
 
-    setText(
-        "loadingText",
-        "Chargement... " +
-        Math.round(percent) +
-        "%"
-    );
+    const text = $("loadingText");
+
+    if (text) {
+        text.textContent =
+            "Chargement... " +
+            Math.round(loadingProgress) +
+            "%";
+    }
 }
 
+function setLoadingText(text) {
+
+    const el = $("loadingText");
+
+    if (el) {
+        el.textContent = text;
+    }
+}
 
 function finishLoading() {
 
-    if (loadingFinished) {
-        return;
-    }
-
-    loadingFinished = true;
-
     setLoadingProgress(100);
 
-    setText(
-        "loadingText",
-        "RoadGame prêt !"
+    setLoadingText(
+        connected
+            ? "Serveur connecté !"
+            : "Prêt !"
     );
 
     setTimeout(() => {
 
         hide("loadingScreen");
 
-        show("authScreen");
+        if (!loggedIn) {
+            show("authScreen");
+        } else {
+            show("mainMenu");
+        }
 
     }, 250);
 }
 
-
-/*
-    IMPORTANT :
-
-    On ne bloque jamais le jeu en attendant Render.
-
-    Render peut mettre quelques secondes à réveiller
-    le serveur.
-
-    L'écran de connexion apparaît quand même.
-*/
-
 function startLoading() {
 
-    setLoadingProgress(5);
+    setLoadingProgress(10);
+
+    setLoadingText(
+        "Préparation du jeu..."
+    );
 
     setTimeout(() => {
-
-        setLoadingProgress(25);
-
+        setLoadingProgress(35);
     }, 150);
 
     setTimeout(() => {
-
-        setLoadingProgress(50);
-
+        setLoadingProgress(60);
     }, 300);
 
     setTimeout(() => {
-
-        setLoadingProgress(70);
-
+        setLoadingProgress(80);
     }, 500);
 
+    /*
+       ON NE BLOQUE PAS À 90%.
+       Même si Render dort, le jeu continue.
+    */
+
     setTimeout(() => {
 
-        setLoadingProgress(85);
+        if (!$("loadingScreen")
+            ?.classList.contains("hidden")) {
 
-    }, 750);
+            finishLoading();
 
-    setTimeout(() => {
+        }
 
-        finishLoading();
-
-    }, 1200);
+    }, 900);
 }
 
 
@@ -305,27 +258,18 @@ function connectServer() {
     if (
         socket &&
         (
-            socket.readyState ===
-            WebSocket.OPEN ||
-
-            socket.readyState ===
-            WebSocket.CONNECTING
+            socket.readyState === WebSocket.OPEN ||
+            socket.readyState === WebSocket.CONNECTING
         )
     ) {
         return;
     }
 
-    console.log(
-        "📡 Connexion à :",
-        SERVER_URL
-    );
-
     try {
 
-        socket =
-            new WebSocket(
-                SERVER_URL
-            );
+        socket = new WebSocket(
+            SERVER_URL
+        );
 
     } catch (error) {
 
@@ -336,7 +280,6 @@ function connectServer() {
         return;
     }
 
-
     socket.addEventListener(
         "open",
         () => {
@@ -344,16 +287,19 @@ function connectServer() {
             connected = true;
 
             console.log(
-                "🟢 Serveur connecté"
+                "🟢 RoadGame serveur connecté"
             );
 
-            notify(
-                "🟢 Serveur connecté"
-            );
+            if (
+                $("loadingScreen") &&
+                !$("loadingScreen")
+                    .classList.contains("hidden")
+            ) {
+                finishLoading();
+            }
 
         }
     );
-
 
     socket.addEventListener(
         "message",
@@ -362,28 +308,18 @@ function connectServer() {
             let data;
 
             try {
-
-                data =
-                    JSON.parse(
-                        event.data
-                    );
-
+                data = JSON.parse(event.data);
             } catch {
-
-                console.error(
-                    "Message invalide :",
+                console.warn(
+                    "Message serveur invalide",
                     event.data
                 );
-
                 return;
             }
 
-            handleServerMessage(
-                data
-            );
+            handleServerMessage(data);
         }
     );
-
 
     socket.addEventListener(
         "close",
@@ -395,17 +331,16 @@ function connectServer() {
                 "🔴 Serveur déconnecté"
             );
 
-            if (!gameStarted) {
+            if (gameStarted) {
 
-                authMessage(
-                    "Serveur en cours de réveil..."
+                notify(
+                    "⚠️ Serveur déconnecté"
                 );
 
             }
 
         }
     );
-
 
     socket.addEventListener(
         "error",
@@ -424,47 +359,15 @@ function connectServer() {
 
 
 /* =========================================================
-   RECONNEXION AUTOMATIQUE
-========================================================= */
-
-setInterval(() => {
-
-    if (!connected) {
-
-        connectServer();
-
-    }
-
-}, 5000);
-
-
-/* =========================================================
-   ENVOI
+   SEND
 ========================================================= */
 
 function send(data) {
 
-    if (!socket) {
-
-        notify(
-            "Serveur non connecté."
-        );
-
-        connectServer();
-
-        return false;
-    }
-
     if (
-        socket.readyState !==
-        WebSocket.OPEN
+        !socket ||
+        socket.readyState !== WebSocket.OPEN
     ) {
-
-        notify(
-            "Serveur en cours de réveil..."
-        );
-
-        connectServer();
 
         return false;
     }
@@ -478,7 +381,7 @@ function send(data) {
 
 
 /* =========================================================
-   RÉCEPTION SERVEUR
+   SERVEUR
 ========================================================= */
 
 function handleServerMessage(data) {
@@ -486,166 +389,25 @@ function handleServerMessage(data) {
     switch (data.type) {
 
         case "connected":
-
-            connected = true;
-
             break;
-
 
         case "account_created":
-
-            handleAccountCreated(
-                data.user
-            );
-
+            handleAccountCreated(data.user);
             break;
-
 
         case "login_success":
-
-            handleLoginSuccess(
-                data.user
-            );
-
+            handleLoginSuccess(data.user);
             break;
-
 
         case "error":
-
-            handleServerError(
-                data.message
-            );
-
+            handleServerError(data.message);
             break;
-
-
-        case "room_created":
-
-            handleRoomCreated(
-                data
-            );
-
-            break;
-
-
-        case "room_joined":
-
-            handleRoomJoined(
-                data
-            );
-
-            break;
-
-
-        case "quick_match_found":
-
-            handleQuickMatch(
-                data
-            );
-
-            break;
-
-
-        case "quick_match_searching":
-
-            multiplayerMessage(
-                "Recherche d'une partie..."
-            );
-
-            break;
-
-
-        case "player_joined":
-
-            if (data.player) {
-
-                players[
-                    data.player.id
-                ] =
-                    data.player;
-
-            }
-
-            refreshPlayersList();
-
-            break;
-
-
-        case "player_left":
-
-            delete players[
-                data.playerId
-            ];
-
-            refreshPlayersList();
-
-            removeRemotePlayer(
-                data.playerId
-            );
-
-            break;
-
-
-        case "player_update":
-
-            if (data.player) {
-
-                players[
-                    data.player.id
-                ] =
-                    data.player;
-
-                updateRemotePlayerVisual(
-                    data.player
-                );
-
-            }
-
-            refreshPlayersList();
-
-            break;
-
-
-        case "vehicle_update":
-
-        case "vehicle_enter":
-
-        case "vehicle_exit":
-
-            updateRemoteVehicle(
-                data
-            );
-
-            break;
-
-
-        case "vehicle_purchased":
-
-            if (currentUser) {
-
-                currentUser.vehicles =
-                    data.vehicles;
-
-            }
-
-            renderGarage();
-
-            renderShop();
-
-            notify(
-                "🚗 Véhicule acheté !"
-            );
-
-            break;
-
 
         case "username_changed":
 
             if (currentUser) {
-
                 currentUser.username =
                     data.username;
-
             }
 
             setText(
@@ -660,16 +422,89 @@ function handleServerMessage(data) {
 
             break;
 
+        case "room_created":
+            handleRoom(data);
+            break;
 
-        case "friend_added":
+        case "room_joined":
+            handleRoom(data);
+            break;
 
-            currentUser =
-                data.user;
+        case "quick_match_found":
+            handleRoom(data);
+            notify("⚡ Partie trouvée !");
+            break;
 
-            renderFriends();
+        case "quick_match_searching":
+
+            multiplayerMessage(
+                "🔎 Recherche d'une partie..."
+            );
 
             break;
 
+        case "player_joined":
+
+            if (data.player) {
+                players[data.player.id] =
+                    data.player;
+            }
+
+            refreshPlayersList();
+
+            break;
+
+        case "player_left":
+
+            delete players[data.playerId];
+
+            refreshPlayersList();
+
+            break;
+
+        case "player_update":
+
+            if (data.player) {
+                players[data.player.id] =
+                    data.player;
+            }
+
+            refreshPlayersList();
+
+            break;
+
+        case "vehicle_update":
+
+        case "vehicle_enter":
+
+        case "vehicle_exit":
+
+            updateRemoteVehicle(data);
+
+            break;
+
+        case "vehicle_purchased":
+
+            if (currentUser) {
+                currentUser.vehicles =
+                    data.vehicles;
+            }
+
+            renderGarage();
+            renderShop();
+
+            notify("🚗 Véhicule acheté !");
+
+            break;
+
+        case "settings_updated":
+
+            if (currentUser) {
+                currentUser.settings =
+                    data.settings;
+            }
+
+            break;
 
         case "friend_request_sent":
 
@@ -680,24 +515,28 @@ function handleServerMessage(data) {
 
             break;
 
+        case "friend_added":
 
-        case "settings_updated":
-
-            if (currentUser) {
-
-                currentUser.settings =
-                    data.settings;
-
+            if (data.user) {
+                currentUser = data.user;
             }
+
+            renderFriends();
 
             break;
 
+        default:
+
+            console.log(
+                "Message non géré :",
+                data.type
+            );
     }
 }
 
 
 /* =========================================================
-   ERREURS
+   SERVER ERROR
 ========================================================= */
 
 function handleServerError(message) {
@@ -710,13 +549,10 @@ function handleServerError(message) {
     if (
         $("authScreen") &&
         !$("authScreen")
-            .classList
-            .contains("hidden")
+            .classList.contains("hidden")
     ) {
 
-        authMessage(
-            message
-        );
+        authMessage(message);
 
         return;
     }
@@ -724,92 +560,28 @@ function handleServerError(message) {
     if (
         $("multiplayerScreen") &&
         !$("multiplayerScreen")
-            .classList
-            .contains("hidden")
+            .classList.contains("hidden")
     ) {
 
-        multiplayerMessage(
-            message
-        );
+        multiplayerMessage(message);
 
         return;
     }
 
-    notify(
-        "❌ " + message
-    );
+    notify("❌ " + message);
 }
 
 
 /* =========================================================
-   COMPTE
-========================================================= */
-
-function handleAccountCreated(user) {
-
-    currentUser =
-        user;
-
-    loggedIn = true;
-
-    selectedVehicle =
-        user.selectedVehicle ||
-        "car";
-
-    authMessage(
-        "Compte créé !",
-        true
-    );
-
-    setTimeout(
-        openMainMenu,
-        300
-    );
-}
-
-
-function handleLoginSuccess(user) {
-
-    currentUser =
-        user;
-
-    loggedIn = true;
-
-    selectedVehicle =
-        user.selectedVehicle ||
-        "car";
-
-    authMessage(
-        "Connexion réussie !",
-        true
-    );
-
-    setTimeout(
-        openMainMenu,
-        300
-    );
-}
-
-
-/* =========================================================
-   INSCRIPTION
+   COMPTES
 ========================================================= */
 
 function registerAccount() {
 
-    const username =
-        $("usernameInput")
-            .value
-            .trim();
-
-    const password =
-        $("passwordInput")
-            .value;
-
     if (!connected) {
 
         authMessage(
-            "⏳ Le serveur se réveille. Réessaie dans quelques secondes."
+            "⏳ Le serveur est encore en démarrage. Réessaie dans quelques secondes."
         );
 
         connectServer();
@@ -817,10 +589,18 @@ function registerAccount() {
         return;
     }
 
+    const username =
+        $("usernameInput")
+            .value.trim();
+
+    const password =
+        $("passwordInput")
+            .value;
+
     if (username.length < 3) {
 
         authMessage(
-            "Le pseudo doit avoir au moins 3 caractères."
+            "Le pseudo doit contenir au moins 3 caractères."
         );
 
         return;
@@ -829,7 +609,7 @@ function registerAccount() {
     if (password.length < 4) {
 
         authMessage(
-            "Le mot de passe doit avoir au moins 4 caractères."
+            "Le mot de passe doit contenir au moins 4 caractères."
         );
 
         return;
@@ -847,25 +627,12 @@ function registerAccount() {
 }
 
 
-/* =========================================================
-   CONNEXION
-========================================================= */
-
 function loginAccount() {
-
-    const username =
-        $("usernameInput")
-            .value
-            .trim();
-
-    const password =
-        $("passwordInput")
-            .value;
 
     if (!connected) {
 
         authMessage(
-            "⏳ Le serveur se réveille. Réessaie dans quelques secondes."
+            "⏳ Le serveur n'est pas encore disponible."
         );
 
         connectServer();
@@ -873,19 +640,18 @@ function loginAccount() {
         return;
     }
 
-    if (!username) {
+    const username =
+        $("usernameInput")
+            .value.trim();
+
+    const password =
+        $("passwordInput")
+            .value;
+
+    if (!username || !password) {
 
         authMessage(
-            "Entre ton pseudo."
-        );
-
-        return;
-    }
-
-    if (!password) {
-
-        authMessage(
-            "Entre ton mot de passe."
+            "Entre ton pseudo et ton mot de passe."
         );
 
         return;
@@ -900,6 +666,44 @@ function loginAccount() {
         username,
         password
     });
+}
+
+
+function handleAccountCreated(user) {
+
+    currentUser = user;
+
+    loggedIn = true;
+
+    selectedVehicle =
+        user.selectedVehicle ||
+        "car";
+
+    authMessage(
+        "Compte créé !",
+        true
+    );
+
+    setTimeout(openMainMenu, 300);
+}
+
+
+function handleLoginSuccess(user) {
+
+    currentUser = user;
+
+    loggedIn = true;
+
+    selectedVehicle =
+        user.selectedVehicle ||
+        "car";
+
+    authMessage(
+        "Connexion réussie !",
+        true
+    );
+
+    setTimeout(openMainMenu, 300);
 }
 
 
@@ -948,20 +752,20 @@ function playAsGuest() {
 
 function openMainMenu() {
 
-    document
-        .querySelectorAll(".screen")
-        .forEach(screen => {
-
-            if (
-                screen.id !==
-                "mainMenu"
-            ) {
-                screen.classList.add(
-                    "hidden"
-                );
-            }
-
-        });
+    [
+        "authScreen",
+        "multiplayerScreen",
+        "privateRoomScreen",
+        "roomScreen",
+        "friendsScreen",
+        "garageScreen",
+        "shopScreen",
+        "settingsScreen",
+        "usernameScreen",
+        "mapScreen",
+        "pauseScreen",
+        "gameHud"
+    ].forEach(hide);
 
     show("mainMenu");
 
@@ -971,17 +775,199 @@ function openMainMenu() {
         (
             currentUser
                 ? currentUser.username
-                : "Invité"
+                : "Joueur"
         )
     );
 
     renderGarage();
-
     renderShop();
-
     renderFriends();
+}
 
-    updateHUD();
+
+/* =========================================================
+   ADRESSE OPENSTREETMAP
+========================================================= */
+
+async function searchAddress() {
+
+    const input = $("addressInput");
+
+    const result = $("addressResult");
+
+    if (!input || !result) return;
+
+    const query =
+        input.value.trim();
+
+    if (!query) {
+
+        result.textContent =
+            "Entre une adresse ou une ville.";
+
+        return;
+    }
+
+    result.textContent =
+        "🔎 Recherche...";
+
+    try {
+
+        const url =
+            NOMINATIM_URL +
+            "?format=jsonv2" +
+            "&limit=5" +
+            "&q=" +
+            encodeURIComponent(query);
+
+        const response =
+            await fetch(url, {
+                headers: {
+                    "Accept":
+                        "application/json"
+                }
+            });
+
+        if (!response.ok) {
+            throw new Error(
+                "Nominatim HTTP " +
+                response.status
+            );
+        }
+
+        const results =
+            await response.json();
+
+        if (!results.length) {
+
+            result.textContent =
+                "❌ Adresse introuvable.";
+
+            return;
+        }
+
+        result.innerHTML = "";
+
+        results.forEach(place => {
+
+            const button =
+                document.createElement(
+                    "button"
+                );
+
+            button.className =
+                "addressFound";
+
+            button.style.width =
+                "100%";
+
+            button.style.color =
+                "white";
+
+            button.textContent =
+                "📍 " +
+                place.display_name;
+
+            button.onclick = () => {
+
+                spawnLocation = {
+
+                    lat:
+                        Number(place.lat),
+
+                    lon:
+                        Number(place.lon),
+
+                    name:
+                        place.display_name
+
+                };
+
+                result.innerHTML =
+                    "✅ Spawn sélectionné :<br>" +
+                    place.display_name;
+
+                notify(
+                    "📍 Spawn défini !"
+                );
+
+                /*
+                   Si le joueur est déjà dans la partie,
+                   on le téléporte immédiatement.
+                */
+
+                if (gameStarted) {
+
+                    spawnAtLocation(
+                        spawnLocation
+                    );
+
+                }
+
+            };
+
+            result.appendChild(button);
+
+        });
+
+    } catch (error) {
+
+        console.error(
+            "Erreur OpenStreetMap :",
+            error
+        );
+
+        result.textContent =
+            "❌ Impossible de rechercher l'adresse. Vérifie ta connexion.";
+
+    }
+}
+
+
+/* =========================================================
+   SPAWN
+========================================================= */
+
+function spawnAtLocation(location) {
+
+    /*
+       Conversion approximative des coordonnées GPS
+       en monde de jeu.
+    */
+
+    player.x =
+        location.lon * 1000;
+
+    player.y =
+        location.lat * 1000;
+
+    player.vx = 0;
+    player.vy = 0;
+    player.speed = 0;
+
+    cameraX = player.x;
+    cameraY = player.y;
+
+    notify(
+        "📍 Spawn : " +
+        location.name
+    );
+
+    if (connected) {
+
+        send({
+            type: "player_update",
+
+            x: player.x,
+            y: player.y,
+
+            lat: location.lat,
+            lon: location.lon,
+
+            vehicle: selectedVehicle
+        });
+
+    }
 }
 
 
@@ -996,28 +982,25 @@ function openMultiplayer() {
     show("multiplayerScreen");
 
     multiplayerMessage("");
-
-    if (!connected) {
-
-        connectServer();
-
-    }
 }
 
 
 function createPublicRoom() {
 
+    if (!connected) {
+
+        multiplayerMessage(
+            "⏳ Serveur indisponible."
+        );
+
+        connectServer();
+
+        return;
+    }
+
     send({
         type: "create_room",
-
-        vehicle:
-            selectedVehicle,
-
-        latitude:
-            spawnLatitude,
-
-        longitude:
-            spawnLongitude
+        vehicle: selectedVehicle
     });
 }
 
@@ -1027,8 +1010,6 @@ function openPrivateRoom() {
     hide("multiplayerScreen");
 
     show("privateRoomScreen");
-
-    privateMessage("");
 }
 
 
@@ -1055,13 +1036,7 @@ function createPrivateRoom() {
         password,
 
         vehicle:
-            selectedVehicle,
-
-        latitude:
-            spawnLatitude,
-
-        longitude:
-            spawnLongitude
+            selectedVehicle
 
     });
 }
@@ -1090,21 +1065,14 @@ function joinRoom() {
 
     send({
 
-        type:
-            "join_room",
+        type: "join_room",
 
         room,
 
         password,
 
         vehicle:
-            selectedVehicle,
-
-        latitude:
-            spawnLatitude,
-
-        longitude:
-            spawnLongitude
+            selectedVehicle
 
     });
 }
@@ -1112,8 +1080,19 @@ function joinRoom() {
 
 function quickMatch() {
 
+    if (!connected) {
+
+        multiplayerMessage(
+            "⏳ Serveur indisponible."
+        );
+
+        connectServer();
+
+        return;
+    }
+
     multiplayerMessage(
-        "Recherche..."
+        "🔎 Recherche..."
     );
 
     send({
@@ -1122,13 +1101,7 @@ function quickMatch() {
             "quick_match",
 
         vehicle:
-            selectedVehicle,
-
-        latitude:
-            spawnLatitude,
-
-        longitude:
-            spawnLongitude
+            selectedVehicle
 
     });
 }
@@ -1138,7 +1111,7 @@ function quickMatch() {
    ROOM
 ========================================================= */
 
-function handleRoomCreated(data) {
+function handleRoom(data) {
 
     currentRoom =
         data.room;
@@ -1151,18 +1124,14 @@ function handleRoomCreated(data) {
     if (Array.isArray(data.players)) {
 
         data.players.forEach(
-            player => {
-
-                players[player.id] =
-                    player;
-
+            p => {
+                players[p.id] = p;
             }
         );
 
     }
 
     hide("multiplayerScreen");
-
     hide("privateRoomScreen");
 
     show("roomScreen");
@@ -1176,82 +1145,6 @@ function handleRoomCreated(data) {
 }
 
 
-function handleRoomJoined(data) {
-
-    currentRoom =
-        data.room;
-
-    currentPlayerId =
-        data.playerId;
-
-    players = {};
-
-    if (Array.isArray(data.players)) {
-
-        data.players.forEach(
-            player => {
-
-                players[player.id] =
-                    player;
-
-            }
-        );
-
-    }
-
-    hide("multiplayerScreen");
-
-    show("roomScreen");
-
-    setText(
-        "currentRoomCode",
-        currentRoom
-    );
-
-    refreshPlayersList();
-}
-
-
-function handleQuickMatch(data) {
-
-    currentRoom =
-        data.room;
-
-    currentPlayerId =
-        data.playerId;
-
-    players = {};
-
-    if (Array.isArray(data.players)) {
-
-        data.players.forEach(
-            player => {
-
-                players[player.id] =
-                    player;
-
-            }
-        );
-
-    }
-
-    hide("multiplayerScreen");
-
-    show("roomScreen");
-
-    setText(
-        "currentRoomCode",
-        currentRoom
-    );
-
-    refreshPlayersList();
-
-    notify(
-        "⚡ Partie trouvée !"
-    );
-}
-
-
 /* =========================================================
    JOUEURS
 ========================================================= */
@@ -1261,14 +1154,12 @@ function refreshPlayersList() {
     const list =
         $("playersList");
 
-    if (!list) {
-        return;
-    }
+    if (!list) return;
 
     list.innerHTML = "";
 
     Object.values(players)
-        .forEach(player => {
+        .forEach(p => {
 
             const div =
                 document.createElement(
@@ -1278,133 +1169,1144 @@ function refreshPlayersList() {
             div.className =
                 "playerItem";
 
-            const vehicle =
-                player.inVehicle
-                    ? "🚗 " +
-                      player.vehicle
-                    : "🚶 À pied";
-
             div.textContent =
-                player.name +
+                "👤 " +
+                (
+                    p.name ||
+                    p.username ||
+                    "Joueur"
+                ) +
                 " — " +
-                vehicle;
+                (
+                    p.inVehicle
+                        ? "🚗"
+                        : "🚶"
+                );
 
-            list.appendChild(
-                div
-            );
+            list.appendChild(div);
 
         });
 }
 
 
+function updateRemoteVehicle(data) {
+
+    const p =
+        players[data.playerId];
+
+    if (!p) return;
+
+    p.vehicle =
+        data.vehicle;
+
+    p.inVehicle =
+        data.inVehicle;
+
+    refreshPlayersList();
+}
+
+
 /* =========================================================
-   POSITION
+   QUITTER ROOM
 ========================================================= */
 
-function sendPlayerPosition() {
+function leaveRoom() {
 
-    if (!currentPlayerId) {
+    if (socket) {
+
+        try {
+            socket.close();
+        } catch {}
+
+    }
+
+    currentRoom = null;
+    currentPlayerId = null;
+
+    players = {};
+
+    connected = false;
+
+    hide("roomScreen");
+
+    show("mainMenu");
+
+    setTimeout(
+        connectServer,
+        500
+    );
+}
+
+
+/* =========================================================
+   JEU
+========================================================= */
+
+function startGame() {
+
+    gameStarted = true;
+
+    hide("mainMenu");
+    hide("roomScreen");
+    hide("pauseScreen");
+
+    show("gameHud");
+
+    initGameCanvas();
+
+    spawnAtLocation(
+        spawnLocation
+    );
+
+    notify(
+        "🚗 Bienvenue dans RoadGame !"
+    );
+
+    requestAnimationFrame(
+        gameLoop
+    );
+}
+
+
+function initGameCanvas() {
+
+    gameCanvas =
+        $("gameCanvas");
+
+    if (!gameCanvas) return;
+
+    gameCtx =
+        gameCanvas.getContext("2d");
+
+    resizeCanvas();
+
+    window.addEventListener(
+        "resize",
+        resizeCanvas
+    );
+}
+
+
+function resizeCanvas() {
+
+    if (!gameCanvas) return;
+
+    const dpr =
+        Math.min(
+            window.devicePixelRatio || 1,
+            2
+        );
+
+    gameCanvas.width =
+        window.innerWidth * dpr;
+
+    gameCanvas.height =
+        window.innerHeight * dpr;
+
+    gameCanvas.style.width =
+        window.innerWidth + "px";
+
+    gameCanvas.style.height =
+        window.innerHeight + "px";
+
+    if (gameCtx) {
+        gameCtx.setTransform(
+            dpr,
+            0,
+            0,
+            dpr,
+            0,
+            0
+        );
+    }
+}
+
+
+/* =========================================================
+   PHYSIQUE + CAMÉRA
+========================================================= */
+
+function updateGame(dt) {
+
+    const inputX =
+        joystick.x;
+
+    const inputY =
+        joystick.y;
+
+    const inputPower =
+        Math.min(
+            1,
+            Math.hypot(
+                inputX,
+                inputY
+            )
+        );
+
+    /*
+       Joystick vers le haut = avancer.
+    */
+
+    if (inputPower > 0.05) {
+
+        const targetAngle =
+            Math.atan2(
+                inputY,
+                inputX
+            ) +
+            Math.PI / 2;
+
+        /*
+           Rotation progressive du joueur.
+        */
+
+        let difference =
+            normalizeAngle(
+                targetAngle -
+                player.angle
+            );
+
+        player.angle +=
+            difference *
+            Math.min(
+                1,
+                dt * 10
+            );
+
+        const acceleration =
+            selectedVehicle === "walk"
+                ? 180
+                : 260;
+
+        player.speed +=
+            acceleration *
+            inputPower *
+            dt;
+
+    } else {
+
+        player.speed *=
+            Math.pow(
+                0.08,
+                dt
+            );
+    }
+
+    const maxSpeed =
+        selectedVehicle === "walk"
+            ? 180
+            : 500;
+
+    player.speed =
+        Math.max(
+            -maxSpeed,
+            Math.min(
+                maxSpeed,
+                player.speed
+            )
+        );
+
+    /*
+       Marche arrière avec bas du joystick.
+    */
+
+    const directionX =
+        Math.sin(player.angle);
+
+    const directionY =
+        -Math.cos(player.angle);
+
+    player.vx =
+        directionX *
+        player.speed;
+
+    player.vy =
+        directionY *
+        player.speed;
+
+    player.x +=
+        player.vx *
+        dt;
+
+    player.y +=
+        player.vy *
+        dt;
+
+    /*
+       Caméra suit le joueur.
+    */
+
+    cameraX +=
+        (player.x - cameraX) *
+        Math.min(
+            1,
+            dt * 6
+        );
+
+    cameraY +=
+        (player.y - cameraY) *
+        Math.min(
+            1,
+            dt * 6
+        );
+
+    /*
+       CAMÉRA QUI TOURNE.
+       Elle suit progressivement
+       l'orientation du véhicule.
+    */
+
+    let cameraDifference =
+        normalizeAngle(
+            player.angle -
+            cameraAngle
+        );
+
+    cameraAngle +=
+        cameraDifference *
+        Math.min(
+            1,
+            dt * 5
+        );
+
+    /*
+       Envoie la position aux autres joueurs.
+    */
+
+    if (
+        connected &&
+        Math.abs(player.speed) > 1
+    ) {
+
+        send({
+            type: "player_update",
+
+            x: player.x,
+            y: player.y,
+
+            angle: player.angle,
+
+            vehicle:
+                selectedVehicle
+        });
+
+    }
+}
+
+
+function normalizeAngle(angle) {
+
+    while (angle > Math.PI) {
+        angle -= Math.PI * 2;
+    }
+
+    while (angle < -Math.PI) {
+        angle += Math.PI * 2;
+    }
+
+    return angle;
+}
+
+
+/* =========================================================
+   DESSIN DU MONDE
+========================================================= */
+
+function drawGame() {
+
+    if (!gameCtx) return;
+
+    const ctx = gameCtx;
+
+    const width =
+        window.innerWidth;
+
+    const height =
+        window.innerHeight;
+
+    ctx.clearRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+    /*
+       Fond.
+    */
+
+    ctx.fillStyle =
+        "#24372b";
+
+    ctx.fillRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+    ctx.save();
+
+    ctx.translate(
+        width / 2,
+        height / 2
+    );
+
+    /*
+       Rotation de la caméra.
+    */
+
+    ctx.rotate(
+        -cameraAngle
+    );
+
+    ctx.translate(
+        -cameraX,
+        -cameraY
+    );
+
+    /*
+       Grille du monde.
+    */
+
+    drawRoads(
+        ctx,
+        cameraX,
+        cameraY,
+        width,
+        height
+    );
+
+    /*
+       Joueur.
+    */
+
+    drawPlayer(
+        ctx
+    );
+
+    /*
+       Joueurs multijoueur.
+    */
+
+    Object.values(players)
+        .forEach(remote => {
+
+            if (
+                remote.id ===
+                currentPlayerId
+            ) {
+                return;
+            }
+
+            if (
+                typeof remote.x !==
+                "number"
+            ) {
+                return;
+            }
+
+            drawRemotePlayer(
+                ctx,
+                remote
+            );
+
+        });
+
+    ctx.restore();
+}
+
+
+function drawRoads(
+    ctx,
+    cx,
+    cy,
+    width,
+    height
+) {
+
+    const size = 1200;
+
+    const startX =
+        Math.floor(
+            (cx - width) / 300
+        ) * 300;
+
+    const endX =
+        Math.ceil(
+            (cx + width) / 300
+        ) * 300;
+
+    const startY =
+        Math.floor(
+            (cy - height) / 300
+        ) * 300;
+
+    const endY =
+        Math.ceil(
+            (cy + height) / 300
+        ) * 300;
+
+    ctx.fillStyle =
+        "#303437";
+
+    for (
+        let x = startX;
+        x <= endX;
+        x += 300
+    ) {
+
+        ctx.fillRect(
+            x - 55,
+            startY - size,
+            110,
+            size * 3
+        );
+
+        ctx.strokeStyle =
+            "#eee";
+
+        ctx.lineWidth = 6;
+
+        ctx.setLineDash(
+            [35, 30]
+        );
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            x,
+            startY - size
+        );
+
+        ctx.lineTo(
+            x,
+            endY + size
+        );
+
+        ctx.stroke();
+
+    }
+
+    for (
+        let y = startY;
+        y <= endY;
+        y += 300
+    ) {
+
+        ctx.fillStyle =
+            "#303437";
+
+        ctx.fillRect(
+            startX - size,
+            y - 55,
+            size * 3,
+            110
+        );
+
+        ctx.strokeStyle =
+            "#eee";
+
+        ctx.lineWidth = 6;
+
+        ctx.setLineDash(
+            [35, 30]
+        );
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            startX - size,
+            y
+        );
+
+        ctx.lineTo(
+            endX + size,
+            y
+        );
+
+        ctx.stroke();
+
+    }
+
+    ctx.setLineDash([]);
+
+    /*
+       Quelques bâtiments.
+    */
+
+    ctx.fillStyle =
+        "#425148";
+
+    for (
+        let x = startX - 150;
+        x < endX + 150;
+        x += 150
+    ) {
+
+        for (
+            let y = startY - 150;
+            y < endY + 150;
+            y += 150
+        ) {
+
+            if (
+                Math.abs(
+                    x % 300
+                ) < 100 &&
+                Math.abs(
+                    y % 300
+                ) < 100
+            ) {
+
+                ctx.fillRect(
+                    x,
+                    y,
+                    70,
+                    70
+                );
+
+            }
+
+        }
+
+    }
+}
+
+
+function drawPlayer(ctx) {
+
+    ctx.save();
+
+    ctx.translate(
+        player.x,
+        player.y
+    );
+
+    ctx.rotate(
+        player.angle
+    );
+
+    if (
+        selectedVehicle ===
+        "walk"
+    ) {
+
+        ctx.fillStyle =
+            "#20b98c";
+
+        ctx.beginPath();
+
+        ctx.arc(
+            0,
+            0,
+            17,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+
+        ctx.fillStyle =
+            "white";
+
+        ctx.fillRect(
+            -7,
+            -5,
+            14,
+            18
+        );
+
+    } else {
+
+        ctx.fillStyle =
+            "#e63e3e";
+
+        ctx.roundRect(
+            -22,
+            -38,
+            44,
+            76,
+            10
+        );
+
+        ctx.fill();
+
+        ctx.fillStyle =
+            "#222";
+
+        ctx.fillRect(
+            -15,
+            -20,
+            30,
+            22
+        );
+
+        ctx.fillStyle =
+            "#fff";
+
+        ctx.fillRect(
+            -15,
+            -31,
+            7,
+            5
+        );
+
+        ctx.fillRect(
+            8,
+            -31,
+            7,
+            5
+        );
+
+    }
+
+    ctx.restore();
+}
+
+
+function drawRemotePlayer(
+    ctx,
+    remote
+) {
+
+    ctx.save();
+
+    ctx.translate(
+        remote.x,
+        remote.y
+    );
+
+    ctx.fillStyle =
+        "#3978ff";
+
+    ctx.beginPath();
+
+    ctx.arc(
+        0,
+        0,
+        16,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle =
+        "white";
+
+    ctx.font =
+        "14px Arial";
+
+    ctx.textAlign =
+        "center";
+
+    ctx.fillText(
+        remote.name ||
+        remote.username ||
+        "Joueur",
+        0,
+        -25
+    );
+
+    ctx.restore();
+}
+
+
+/* =========================================================
+   GAME LOOP
+========================================================= */
+
+function gameLoop(timestamp) {
+
+    if (!gameStarted) {
         return;
     }
 
-    send({
+    if (!lastFrame) {
+        lastFrame = timestamp;
+    }
 
-        type:
-            "player_update",
+    let dt =
+        (timestamp - lastFrame) /
+        1000;
 
-        latitude:
-            spawnLatitude,
+    lastFrame = timestamp;
 
-        longitude:
-            spawnLongitude,
+    dt =
+        Math.min(
+            dt,
+            0.05
+        );
 
-        rotation: 0
+    updateGame(dt);
+
+    drawGame();
+
+    requestAnimationFrame(
+        gameLoop
+    );
+}
+
+
+/* =========================================================
+   JOYSTICK
+========================================================= */
+
+function setupJoystick() {
+
+    const zone =
+        $("joystick");
+
+    const stick =
+        $("joystickStick");
+
+    if (!zone || !stick) {
+        return;
+    }
+
+    let pointerId = null;
+
+    function updateJoystick(
+        clientX,
+        clientY
+    ) {
+
+        const rect =
+            zone.getBoundingClientRect();
+
+        const centerX =
+            rect.left +
+            rect.width / 2;
+
+        const centerY =
+            rect.top +
+            rect.height / 2;
+
+        let dx =
+            clientX - centerX;
+
+        let dy =
+            clientY - centerY;
+
+        const radius =
+            rect.width / 2;
+
+        const distance =
+            Math.hypot(dx, dy);
+
+        if (
+            distance >
+            radius
+        ) {
+
+            dx =
+                dx / distance *
+                radius;
+
+            dy =
+                dy / distance *
+                radius;
+
+        }
+
+        const normalizedX =
+            dx / radius;
+
+        const normalizedY =
+            dy / radius;
+
+        joystick.x =
+            normalizedX;
+
+        joystick.y =
+            normalizedY;
+
+        const stickRadius =
+            radius * .52;
+
+        stick.style.transform =
+            "translate(" +
+            (
+                normalizedX *
+                stickRadius
+            ) +
+            "px," +
+            (
+                normalizedY *
+                stickRadius
+            ) +
+            "px)";
+    }
+
+    function resetJoystick() {
+
+        pointerId = null;
+
+        joystick.active =
+            false;
+
+        joystick.x = 0;
+        joystick.y = 0;
+
+        stick.style.transform =
+            "translate(0,0)";
+    }
+
+    zone.addEventListener(
+        "pointerdown",
+        event => {
+
+            event.preventDefault();
+
+            pointerId =
+                event.pointerId;
+
+            joystick.active =
+                true;
+
+            try {
+                zone.setPointerCapture(
+                    pointerId
+                );
+            } catch {}
+
+            updateJoystick(
+                event.clientX,
+                event.clientY
+            );
+        }
+    );
+
+    zone.addEventListener(
+        "pointermove",
+        event => {
+
+            if (
+                !joystick.active ||
+                event.pointerId !==
+                pointerId
+            ) {
+                return;
+            }
+
+            event.preventDefault();
+
+            updateJoystick(
+                event.clientX,
+                event.clientY
+            );
+        }
+    );
+
+    zone.addEventListener(
+        "pointerup",
+        event => {
+
+            if (
+                event.pointerId ===
+                pointerId
+            ) {
+                resetJoystick();
+            }
+
+        }
+    );
+
+    zone.addEventListener(
+        "pointercancel",
+        resetJoystick
+    );
+
+    zone.addEventListener(
+        "lostpointercapture",
+        resetJoystick
+    );
+}
+
+
+/* =========================================================
+   CARTE OPENSTREETMAP
+========================================================= */
+
+async function loadLeaflet() {
+
+    if (mapLoaded) return true;
+
+    return new Promise(resolve => {
+
+        if (
+            document.getElementById(
+                "leafletCSS"
+            )
+        ) {
+
+            resolve(true);
+
+            return;
+        }
+
+        const css =
+            document.createElement(
+                "link"
+            );
+
+        css.id =
+            "leafletCSS";
+
+        css.rel =
+            "stylesheet";
+
+        css.href =
+            "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+
+        document.head.appendChild(css);
+
+        const script =
+            document.createElement(
+                "script"
+            );
+
+        script.src =
+            "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+
+        script.onload = () => {
+
+            mapLoaded = true;
+
+            resolve(true);
+
+        };
+
+        script.onerror = () => {
+
+            notify(
+                "❌ Impossible de charger la carte."
+            );
+
+            resolve(false);
+
+        };
+
+        document.body.appendChild(
+            script
+        );
 
     });
 }
 
 
+async function openMap() {
+
+    show("mapScreen");
+
+    const loaded =
+        await loadLeaflet();
+
+    if (!loaded) return;
+
+    if (!map) {
+
+        map =
+            L.map(
+                "map",
+                {
+                    zoomControl: false,
+                    touchZoom: true,
+                    scrollWheelZoom: true,
+                    doubleClickZoom: true
+                }
+            );
+
+        /*
+           OpenStreetMap
+        */
+
+        L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+                maxZoom: 19,
+                attribution:
+                    "© OpenStreetMap contributors"
+            }
+        ).addTo(map);
+
+    }
+
+    setTimeout(() => {
+
+        map.invalidateSize();
+
+        map.setView(
+            [
+                spawnLocation.lat,
+                spawnLocation.lon
+            ],
+            16
+        );
+
+        if (window.spawnMarker) {
+            window.spawnMarker.remove();
+        }
+
+        window.spawnMarker =
+            L.marker([
+                spawnLocation.lat,
+                spawnLocation.lon
+            ])
+            .addTo(map)
+            .bindPopup(
+                "📍 Ton spawn"
+            )
+            .openPopup();
+
+    }, 100);
+
+}
+
+
+function closeMap() {
+    hide("mapScreen");
+}
+
+
 /* =========================================================
-   VISUELS JOUEURS DISTANTS
+   ZOOM TACTILE
 ========================================================= */
 
-function updateRemotePlayerVisual(player) {
-
-    if (!player) {
-        return;
-    }
-
-    let element =
-        document.getElementById(
-            "remote-" + player.id
-        );
-
-    if (!element) {
-
-        element =
-            document.createElement(
-                "div"
-            );
-
-        element.id =
-            "remote-" +
-            player.id;
-
-        element.className =
-            "remoteCar";
-
-        $("gameWorld")
-            ?.appendChild(
-                element
-            );
-    }
+function setupMapTouch() {
 
     /*
-       Position simplifiée autour du joueur.
-       Le serveur continue de gérer les vraies coordonnées.
+       Leaflet gère déjà le pinch-to-zoom.
+       On ajoute juste une protection pour
+       éviter les gestes qui scrollent la page.
     */
 
-    const latDifference =
-        player.latitude -
-        spawnLatitude;
+    const mapElement =
+        $("map");
 
-    const lonDifference =
-        player.longitude -
-        spawnLongitude;
+    if (!mapElement) return;
 
-    const x =
-        window.innerWidth / 2 +
-        lonDifference * 100000;
+    mapElement.addEventListener(
+        "touchmove",
+        event => {
 
-    const y =
-        window.innerHeight / 2 -
-        latDifference * 100000;
+            if (
+                event.touches.length >= 2
+            ) {
+                event.preventDefault();
+            }
 
-    element.style.left =
-        x + "px";
-
-    element.style.top =
-        y + "px";
-}
-
-
-function removeRemotePlayer(id) {
-
-    const element =
-        document.getElementById(
-            "remote-" + id
-        );
-
-    if (element) {
-
-        element.remove();
-
-    }
+        },
+        {
+            passive: false
+        }
+    );
 }
 
 
 /* =========================================================
-   VÉHICULES
+   GARAGE
 ========================================================= */
 
 const VEHICLE_NAMES = {
@@ -1435,9 +2337,7 @@ function renderGarage() {
     const container =
         $("garageVehicles");
 
-    if (!container) {
-        return;
-    }
+    if (!container) return;
 
     container.innerHTML = "";
 
@@ -1445,60 +2345,58 @@ function renderGarage() {
         currentUser?.vehicles ||
         ["car"];
 
-    vehicles.forEach(
-        vehicle => {
+    vehicles.forEach(vehicle => {
 
-            const button =
-                document.createElement(
-                    "button"
-                );
-
-            button.className =
-                "vehicleCard";
-
-            if (
-                vehicle ===
-                selectedVehicle
-            ) {
-
-                button.classList.add(
-                    "selected"
-                );
-
-            }
-
-            button.textContent =
-                VEHICLE_NAMES[
-                    vehicle
-                ] ||
-                vehicle;
-
-            button.onclick =
-                () => {
-
-                    selectedVehicle =
-                        vehicle;
-
-                    setText(
-                        "selectedVehicleText",
-                        "Véhicule sélectionné : " +
-                        (
-                            VEHICLE_NAMES[
-                                vehicle
-                            ] ||
-                            vehicle
-                        )
-                    );
-
-                    renderGarage();
-
-                };
-
-            container.appendChild(
-                button
+        const button =
+            document.createElement(
+                "button"
             );
 
-        });
+        button.className =
+            "vehicleCard";
+
+        if (
+            vehicle ===
+            selectedVehicle
+        ) {
+
+            button.classList.add(
+                "selected"
+            );
+
+        }
+
+        button.textContent =
+            VEHICLE_NAMES[vehicle] ||
+            vehicle;
+
+        button.onclick = () => {
+
+            selectedVehicle =
+                vehicle;
+
+            setText(
+                "selectedVehicleText",
+                "Véhicule sélectionné : " +
+                (
+                    VEHICLE_NAMES[
+                        vehicle
+                    ] ||
+                    vehicle
+                )
+            );
+
+            renderGarage();
+
+            updateHUD();
+
+        };
+
+        container.appendChild(
+            button
+        );
+
+    });
 }
 
 
@@ -1511,7 +2409,7 @@ function useVehicle() {
     show("mainMenu");
 
     notify(
-        "🚗 Véhicule sélectionné"
+        "🚗 Véhicule sélectionné !"
     );
 }
 
@@ -1525,9 +2423,7 @@ function renderShop() {
     const container =
         $("shopVehicles");
 
-    if (!container) {
-        return;
-    }
+    if (!container) return;
 
     container.innerHTML = "";
 
@@ -1540,808 +2436,85 @@ function renderShop() {
         "bus",
         "plane",
         "boat"
-    ]
-        .forEach(
-            vehicle => {
-
-                const card =
-                    document.createElement(
-                        "div"
-                    );
-
-                card.className =
-                    "vehicleCard";
-
-                card.textContent =
-                    VEHICLE_NAMES[
-                        vehicle
-                    ];
-
-                if (
-                    owned.includes(
-                        vehicle
-                    )
-                ) {
-
-                    card.textContent +=
-                        " — ✅ Possédé";
-
-                } else {
-
-                    const button =
-                        document.createElement(
-                            "button"
-                        );
-
-                    button.textContent =
-                        "Acheter";
-
-                    button.className =
-                        "primaryButton";
-
-                    button.onclick =
-                        () => {
-
-                            send({
-
-                                type:
-                                    "buy_vehicle",
-
-                                vehicle
-
-                            });
-
-                        };
-
-                    card.appendChild(
-                        button
-                    );
-                }
-
-                container.appendChild(
-                    card
-                );
-
-            });
-}
-
-
-/* =========================================================
-   AMIS
-========================================================= */
-
-function sendFriendRequest() {
-
-    const username =
-        $("friendUsernameInput")
-            .value
-            .trim();
-
-    if (!username) {
-
-        notify(
-            "Entre un pseudo."
-        );
-
-        return;
-    }
-
-    send({
-
-        type:
-            "friend_request",
-
-        username
-
-    });
-}
-
-
-function renderFriends() {
-
-    const friendList =
-        $("friendsList");
-
-    const requestList =
-        $("friendRequestsList");
-
-    if (!currentUser) {
-        return;
-    }
-
-    if (friendList) {
-
-        friendList.innerHTML =
-            currentUser.friends?.length
-                ? "<p>Amis enregistrés.</p>"
-                : "<p>Aucun ami.</p>";
-
-    }
-
-    if (requestList) {
-
-        requestList.innerHTML =
-            currentUser.friendRequests?.length
-                ? "<p>Demandes reçues.</p>"
-                : "<p>Aucune demande.</p>";
-
-    }
-}
-
-
-/* =========================================================
-   PARAMÈTRES
-========================================================= */
-
-function saveSettings() {
-
-    if (!currentUser) {
-        return;
-    }
-
-    const sound =
-        $("soundToggle")
-            ?.checked ?? true;
-
-    const music =
-        $("musicToggle")
-            ?.checked ?? true;
-
-    currentUser.settings = {
-
-        sound,
-
-        music
-
-    };
-
-    send({
-
-        type:
-            "settings_update",
-
-        sound,
-
-        music
-
-    });
-}
-
-
-/* =========================================================
-   PSEUDO
-========================================================= */
-
-function changeUsername() {
-
-    const username =
-        $("newUsernameInput")
-            .value
-            .trim();
-
-    if (username.length < 3) {
-
-        usernameMessage(
-            "Minimum 3 caractères."
-        );
-
-        return;
-    }
-
-    send({
-
-        type:
-            "change_username",
-
-        username
-
-    });
-}
-
-
-/* =========================================================
-   LOGOUT
-========================================================= */
-
-function logout() {
-
-    currentUser = null;
-
-    loggedIn = false;
-
-    currentRoom = null;
-
-    currentPlayerId = null;
-
-    players = {};
-
-    gameStarted = false;
-
-    hide("mainMenu");
-
-    hide("settingsScreen");
-
-    hide("gameHud");
-
-    show("authScreen");
-
-    $("usernameInput").value = "";
-
-    $("passwordInput").value = "";
-
-    authMessage(
-        "Déconnecté."
-    );
-}
-
-
-/* =========================================================
-   ADRESSE / OPENSTREETMAP
-========================================================= */
-
-async function searchAddress() {
-
-    const input =
-        $("addressInput");
-
-    const result =
-        $("addressResult");
-
-    if (!input || !result) {
-        return;
-    }
-
-    const query =
-        input.value.trim();
-
-    if (query.length < 3) {
-
-        result.textContent =
-            "Entre une ville ou une adresse.";
-
-        return;
-    }
-
-    result.textContent =
-        "🔎 Recherche...";
-
-    try {
-
-        const url =
-            NOMINATIM_URL +
-            "?format=jsonv2" +
-            "&limit=1" +
-            "&q=" +
-            encodeURIComponent(
-                query
+    ].forEach(vehicle => {
+
+        const div =
+            document.createElement(
+                "div"
             );
 
-        const response =
-            await fetch(
-                url,
-                {
-                    headers: {
-                        "Accept":
-                            "application/json"
-                    }
-                }
-            );
+        div.className =
+            "vehicleCard";
 
-        if (!response.ok) {
-
-            throw new Error(
-                "Erreur OpenStreetMap"
-            );
-
-        }
-
-        const results =
-            await response.json();
+        div.textContent =
+            VEHICLE_NAMES[vehicle];
 
         if (
-            !results ||
-            results.length === 0
+            owned.includes(vehicle)
         ) {
 
-            result.textContent =
-                "❌ Adresse introuvable.";
+            div.innerHTML +=
+                "<p>✅ Possédé</p>";
 
-            return;
-        }
+        } else {
 
-        const place =
-            results[0];
+            const button =
+                document.createElement(
+                    "button"
+                );
 
-        spawnLatitude =
-            Number(
-                place.lat
-            );
+            button.className =
+                "primaryButton";
 
-        spawnLongitude =
-            Number(
-                place.lon
-            );
+            button.textContent =
+                "Acheter";
 
-        mapLatitude =
-            spawnLatitude;
+            button.onclick = () => {
 
-        mapLongitude =
-            spawnLongitude;
+                if (!connected) {
 
-        result.textContent =
-            "📍 " +
-            place.display_name;
+                    notify(
+                        "Serveur indisponible."
+                    );
 
-        notify(
-            "📍 Spawn défini !"
-        );
-
-        drawMap();
-
-    } catch (error) {
-
-        console.error(error);
-
-        result.textContent =
-            "❌ Impossible de rechercher cette adresse.";
-
-    }
-}
-
-
-/* =========================================================
-   CARTE
-========================================================= */
-
-function openMap() {
-
-    show("mapScreen");
-
-    drawMap();
-}
-
-
-function closeMap() {
-
-    hide("mapScreen");
-
-}
-
-
-function worldToMap(
-    latitude,
-    longitude,
-    width,
-    height
-) {
-
-    const scale =
-        100000 *
-        mapZoom;
-
-    const x =
-        width / 2 +
-        (
-            longitude -
-            mapLongitude
-        ) *
-        scale;
-
-    const y =
-        height / 2 -
-        (
-            latitude -
-            mapLatitude
-        ) *
-        scale;
-
-    return {
-        x,
-        y
-    };
-}
-
-
-function drawMap() {
-
-    const canvas =
-        $("mapCanvas");
-
-    if (!canvas) {
-        return;
-    }
-
-    const ctx =
-        canvas.getContext(
-            "2d"
-        );
-
-    const width =
-        window.innerWidth;
-
-    const height =
-        window.innerHeight;
-
-    const dpr =
-        window.devicePixelRatio ||
-        1;
-
-    canvas.width =
-        width * dpr;
-
-    canvas.height =
-        height * dpr;
-
-    canvas.style.width =
-        width + "px";
-
-    canvas.style.height =
-        height + "px";
-
-    ctx.setTransform(
-        dpr,
-        0,
-        0,
-        dpr,
-        0,
-        0
-    );
-
-    ctx.clearRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-
-    /* Fond */
-
-    ctx.fillStyle =
-        "#1c4b2a";
-
-    ctx.fillRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-
-    /* Grille */
-
-    const grid =
-        Math.max(
-            70,
-            150 * mapZoom
-        );
-
-    ctx.strokeStyle =
-        "#3e6648";
-
-    ctx.lineWidth =
-        2;
-
-    for (
-        let x = -width;
-        x < width * 2;
-        x += grid
-    ) {
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            x,
-            0
-        );
-
-        ctx.lineTo(
-            x,
-            height
-        );
-
-        ctx.stroke();
-
-    }
-
-
-    for (
-        let y = -height;
-        y < height * 2;
-        y += grid
-    ) {
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            0,
-            y
-        );
-
-        ctx.lineTo(
-            width,
-            y
-        );
-
-        ctx.stroke();
-
-    }
-
-
-    /* Spawn */
-
-    const spawn =
-        worldToMap(
-            spawnLatitude,
-            spawnLongitude,
-            width,
-            height
-        );
-
-    ctx.fillStyle =
-        "#ff3333";
-
-    ctx.beginPath();
-
-    ctx.arc(
-        spawn.x,
-        spawn.y,
-        12,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.fillStyle =
-        "white";
-
-    ctx.font =
-        "bold 14px Arial";
-
-    ctx.fillText(
-        "📍 Spawn",
-        spawn.x + 15,
-        spawn.y + 5
-    );
-
-
-    /* Joueurs */
-
-    Object.values(players)
-        .forEach(
-            player => {
-
-                if (
-                    player.id ===
-                    currentPlayerId
-                ) {
                     return;
                 }
 
-                if (
-                    !Number.isFinite(
-                        player.latitude
-                    ) ||
-                    !Number.isFinite(
-                        player.longitude
-                    )
-                ) {
-                    return;
-                }
+                send({
 
-                const pos =
-                    worldToMap(
-                        player.latitude,
-                        player.longitude,
-                        width,
-                        height
-                    );
+                    type:
+                        "buy_vehicle",
 
-                ctx.fillStyle =
-                    "#4da6ff";
+                    vehicle
 
-                ctx.beginPath();
+                });
 
-                ctx.arc(
-                    pos.x,
-                    pos.y,
-                    9,
-                    0,
-                    Math.PI * 2
-                );
+            };
 
-                ctx.fill();
+            div.appendChild(
+                button
+            );
 
-            });
-}
+        }
 
-
-/* =========================================================
-   ZOOM
-========================================================= */
-
-function zoomMap(amount) {
-
-    mapZoom += amount;
-
-    mapZoom =
-        Math.max(
-            0.5,
-            Math.min(
-                5,
-                mapZoom
-            )
+        container.appendChild(
+            div
         );
 
-    drawMap();
+    });
 }
 
 
 /* =========================================================
-   ZOOM TACTILE
+   HUD
 ========================================================= */
-
-function setupMapTouch() {
-
-    const canvas =
-        $("mapCanvas");
-
-    if (!canvas) {
-        return;
-    }
-
-    let previousDistance =
-        null;
-
-    canvas.addEventListener(
-        "touchstart",
-        event => {
-
-            if (
-                event.touches.length === 2
-            ) {
-
-                const a =
-                    event.touches[0];
-
-                const b =
-                    event.touches[1];
-
-                previousDistance =
-                    Math.hypot(
-                        a.clientX -
-                        b.clientX,
-
-                        a.clientY -
-                        b.clientY
-                    );
-
-            }
-
-        },
-        {
-            passive: true
-        }
-    );
-
-
-    canvas.addEventListener(
-        "touchmove",
-        event => {
-
-            if (
-                event.touches.length !== 2 ||
-                previousDistance === null
-            ) {
-                return;
-            }
-
-            const a =
-                event.touches[0];
-
-            const b =
-                event.touches[1];
-
-            const distance =
-                Math.hypot(
-                    a.clientX -
-                    b.clientX,
-
-                    a.clientY -
-                    b.clientY
-                );
-
-            const difference =
-                distance -
-                previousDistance;
-
-            if (
-                Math.abs(
-                    difference
-                ) > 2
-            ) {
-
-                mapZoom +=
-                    difference *
-                    0.003;
-
-                mapZoom =
-                    Math.max(
-                        0.5,
-                        Math.min(
-                            5,
-                            mapZoom
-                        )
-                    );
-
-                previousDistance =
-                    distance;
-
-                drawMap();
-
-            }
-
-        },
-        {
-            passive: true
-        }
-    );
-
-
-    canvas.addEventListener(
-        "touchend",
-        () => {
-
-            previousDistance =
-                null;
-
-        },
-        {
-            passive: true
-        }
-    );
-}
-
-
-/* =========================================================
-   JEU
-========================================================= */
-
-function startGame() {
-
-    gameStarted = true;
-
-    hide("mainMenu");
-
-    hide("roomScreen");
-
-    hide("pauseScreen");
-
-    show("gameHud");
-
-    updateHUD();
-
-    sendPlayerPosition();
-
-    notify(
-        "🚗 Tu apparais ici : " +
-        spawnLatitude.toFixed(5) +
-        ", " +
-        spawnLongitude.toFixed(5)
-    );
-
-    drawMap();
-}
-
 
 function updateHUD() {
 
     setText(
         "hudPlayerName",
-        currentUser
-            ? currentUser.username
-            : "Invité"
+        currentUser?.username ||
+        "Invité"
     );
 
     setText(
@@ -2370,15 +2543,19 @@ function enterVehicle() {
 
     }
 
-    send({
+    if (connected) {
 
-        type:
-            "enter_vehicle",
+        send({
 
-        vehicle:
-            selectedVehicle
+            type:
+                "enter_vehicle",
 
-    });
+            vehicle:
+                selectedVehicle
+
+        });
+
+    }
 
     updateHUD();
 }
@@ -2389,224 +2566,169 @@ function exitVehicle() {
     selectedVehicle =
         "walk";
 
-    send({
+    if (connected) {
 
-        type:
-            "exit_vehicle"
+        send({
+            type:
+                "exit_vehicle"
+        });
 
-    });
+    }
 
     updateHUD();
 }
 
 
-function updateRemoteVehicle(data) {
+/* =========================================================
+   AMIS
+========================================================= */
 
-    if (!players[data.playerId]) {
+function sendFriendRequest() {
+
+    const username =
+        $("friendUsernameInput")
+            .value.trim();
+
+    if (!username) {
+
+        notify(
+            "Entre un pseudo."
+        );
+
         return;
     }
 
-    players[
-        data.playerId
-    ].vehicle =
-        data.vehicle;
+    send({
 
-    players[
-        data.playerId
-    ].inVehicle =
-        data.inVehicle;
+        type:
+            "friend_request",
 
-    refreshPlayersList();
+        username
+
+    });
 }
 
 
-/* =========================================================
-   JOYSTICK
-========================================================= */
+function renderFriends() {
 
-function setupJoystick() {
+    const requests =
+        $("friendRequestsList");
 
-    const joystick =
-        $("joystick");
+    const friends =
+        $("friendsList");
 
-    const stick =
-        $("joystickStick");
-
-    if (!joystick || !stick) {
+    if (!requests || !friends) {
         return;
     }
 
-    let active = false;
+    const requestList =
+        currentUser?.friendRequests ||
+        [];
 
-    function move(
-        clientX,
-        clientY
-    ) {
+    const friendList =
+        currentUser?.friends ||
+        [];
 
-        const rect =
-            joystick.getBoundingClientRect();
+    requests.innerHTML =
+        requestList.length
+            ? requestList
+                .map(
+                    r =>
+                        "<div class='playerItem'>" +
+                        String(r) +
+                        "</div>"
+                )
+                .join("")
+            : "<p>Aucune demande.</p>";
 
-        const centerX =
-            rect.left +
-            rect.width / 2;
-
-        const centerY =
-            rect.top +
-            rect.height / 2;
-
-        let dx =
-            clientX -
-            centerX;
-
-        let dy =
-            clientY -
-            centerY;
-
-        const max =
-            rect.width / 2 -
-            27;
-
-        const distance =
-            Math.hypot(
-                dx,
-                dy
-            );
-
-        if (
-            distance > max
-        ) {
-
-            dx =
-                dx /
-                distance *
-                max;
-
-            dy =
-                dy /
-                distance *
-                max;
-
-        }
-
-        stick.style.transform =
-            `translate(${dx}px, ${dy}px)`;
-    }
-
-
-    function reset() {
-
-        active = false;
-
-        stick.style.transform =
-            "translate(0,0)";
-
-    }
-
-
-    joystick.addEventListener(
-        "pointerdown",
-        event => {
-
-            active = true;
-
-            joystick.setPointerCapture(
-                event.pointerId
-            );
-
-            move(
-                event.clientX,
-                event.clientY
-            );
-
-        }
-    );
-
-
-    joystick.addEventListener(
-        "pointermove",
-        event => {
-
-            if (!active) {
-                return;
-            }
-
-            move(
-                event.clientX,
-                event.clientY
-            );
-
-        }
-    );
-
-
-    joystick.addEventListener(
-        "pointerup",
-        reset
-    );
-
-    joystick.addEventListener(
-        "pointercancel",
-        reset
-    );
-
+    friends.innerHTML =
+        friendList.length
+            ? friendList
+                .map(
+                    f =>
+                        "<div class='playerItem'>" +
+                        String(f) +
+                        "</div>"
+                )
+                .join("")
+            : "<p>Tu n'as pas encore d'amis.</p>";
 }
 
 
 /* =========================================================
-   BOUTONS
+   PARAMÈTRES
 ========================================================= */
 
-function setupDriveControls() {
+function saveSettings() {
 
-    document
-        .querySelectorAll(
-            ".driveButton"
-        )
-        .forEach(
-            button => {
+    if (!currentUser) return;
 
-                button.addEventListener(
-                    "pointerdown",
-                    () => {
+    const sound =
+        $("soundToggle")?.checked ??
+        true;
 
-                        button.classList.add(
-                            "active"
-                        );
+    const music =
+        $("musicToggle")?.checked ??
+        true;
 
-                    }
-                );
+    currentUser.settings = {
+        sound,
+        music
+    };
 
-                button.addEventListener(
-                    "pointerup",
-                    () => {
+    send({
 
-                        button.classList.remove(
-                            "active"
-                        );
+        type:
+            "settings_update",
 
-                    }
-                );
+        sound,
+        music
 
-                button.addEventListener(
-                    "pointercancel",
-                    () => {
-
-                        button.classList.remove(
-                            "active"
-                        );
-
-                    }
-                );
-
-            });
+    });
 }
 
 
 /* =========================================================
-   QUITTER ROOM
+   PSEUDO
 ========================================================= */
 
-function leaveRoom() {
+function changeUsername() {
+
+    const username =
+        $("newUsernameInput")
+            .value.trim();
+
+    if (username.length < 3) {
+
+        usernameMessage(
+            "Minimum 3 caractères."
+        );
+
+        return;
+    }
+
+    send({
+
+        type:
+            "change_username",
+
+        username
+
+    });
+}
+
+
+/* =========================================================
+   DÉCONNEXION
+========================================================= */
+
+function logout() {
+
+    currentUser = null;
+
+    loggedIn = false;
+
+    gameStarted = false;
 
     currentRoom = null;
 
@@ -2614,10 +2736,14 @@ function leaveRoom() {
 
     players = {};
 
-    hide("roomScreen");
+    hide("mainMenu");
+    hide("gameHud");
 
-    show("mainMenu");
+    show("authScreen");
 
+    authMessage(
+        "Tu es déconnecté."
+    );
 }
 
 
@@ -2628,7 +2754,6 @@ function leaveRoom() {
 function openPause() {
 
     show("pauseScreen");
-
 }
 
 
@@ -2636,6 +2761,9 @@ function resumeGame() {
 
     hide("pauseScreen");
 
+    if (!gameStarted) {
+        startGame();
+    }
 }
 
 
@@ -2644,11 +2772,9 @@ function exitGame() {
     gameStarted = false;
 
     hide("gameHud");
-
     hide("pauseScreen");
 
     show("mainMenu");
-
 }
 
 
@@ -2662,27 +2788,23 @@ function setupScreens() {
         .querySelectorAll(
             "[data-close]"
         )
-        .forEach(
-            button => {
+        .forEach(button => {
 
-                button.addEventListener(
-                    "click",
-                    () => {
+            button.addEventListener(
+                "click",
+                () => {
 
-                        const id =
-                            button.dataset.close;
+                    const id =
+                        button.dataset.close;
 
-                        hide(id);
+                    hide(id);
 
-                        show(
-                            "mainMenu"
-                        );
+                    show("mainMenu");
 
-                    }
-                );
+                }
+            );
 
-            }
-        );
+        });
 }
 
 
@@ -2710,20 +2832,11 @@ function setupEvents() {
             playAsGuest
         );
 
-
     $("playButton")
         ?.addEventListener(
             "click",
             startGame
         );
-
-
-    $("multiplayerButton")
-        ?.addEventListener(
-            "click",
-            openMultiplayer
-        );
-
 
     $("quickMatchButton")
         ?.addEventListener(
@@ -2732,14 +2845,70 @@ function setupEvents() {
 
                 openMultiplayer();
 
-                setTimeout(
-                    quickMatch,
-                    200
-                );
+                quickMatch();
 
             }
         );
 
+    $("multiplayerButton")
+        ?.addEventListener(
+            "click",
+            openMultiplayer
+        );
+
+    $("garageButton")
+        ?.addEventListener(
+            "click",
+            () => {
+
+                hide("mainMenu");
+
+                show("garageScreen");
+
+                renderGarage();
+
+            }
+        );
+
+    $("shopButton")
+        ?.addEventListener(
+            "click",
+            () => {
+
+                hide("mainMenu");
+
+                show("shopScreen");
+
+                renderShop();
+
+            }
+        );
+
+    $("friendsButton")
+        ?.addEventListener(
+            "click",
+            () => {
+
+                hide("mainMenu");
+
+                show("friendsScreen");
+
+                renderFriends();
+
+            }
+        );
+
+    $("settingsButton")
+        ?.addEventListener(
+            "click",
+            () => {
+
+                hide("mainMenu");
+
+                show("settingsScreen");
+
+            }
+        );
 
     $("quickMatchButton2")
         ?.addEventListener(
@@ -2747,13 +2916,11 @@ function setupEvents() {
             quickMatch
         );
 
-
     $("createRoomButton")
         ?.addEventListener(
             "click",
             createPublicRoom
         );
-
 
     $("createPrivateRoomButton")
         ?.addEventListener(
@@ -2761,13 +2928,11 @@ function setupEvents() {
             openPrivateRoom
         );
 
-
     $("confirmPrivateRoomButton")
         ?.addEventListener(
             "click",
             createPrivateRoom
         );
-
 
     $("joinRoomButton")
         ?.addEventListener(
@@ -2775,13 +2940,11 @@ function setupEvents() {
             joinRoom
         );
 
-
     $("startRoomButton")
         ?.addEventListener(
             "click",
             startGame
         );
-
 
     $("leaveRoomButton")
         ?.addEventListener(
@@ -2789,13 +2952,11 @@ function setupEvents() {
             leaveRoom
         );
 
-
     $("spawnVehicleButton")
         ?.addEventListener(
             "click",
             useVehicle
         );
-
 
     $("sendFriendRequestButton")
         ?.addEventListener(
@@ -2803,13 +2964,11 @@ function setupEvents() {
             sendFriendRequest
         );
 
-
     $("soundToggle")
         ?.addEventListener(
             "change",
             saveSettings
         );
-
 
     $("musicToggle")
         ?.addEventListener(
@@ -2817,23 +2976,17 @@ function setupEvents() {
             saveSettings
         );
 
-
     $("changeUsernameButton")
         ?.addEventListener(
             "click",
             () => {
 
-                hide(
-                    "settingsScreen"
-                );
+                hide("settingsScreen");
 
-                show(
-                    "usernameScreen"
-                );
+                show("usernameScreen");
 
             }
         );
-
 
     $("confirmUsernameButton")
         ?.addEventListener(
@@ -2841,13 +2994,11 @@ function setupEvents() {
             changeUsername
         );
 
-
     $("logoutButton")
         ?.addEventListener(
             "click",
             logout
         );
-
 
     $("mapButton")
         ?.addEventListener(
@@ -2855,27 +3006,11 @@ function setupEvents() {
             openMap
         );
 
-
     $("closeMapButton")
         ?.addEventListener(
             "click",
             closeMap
         );
-
-
-    $("mapZoomIn")
-        ?.addEventListener(
-            "click",
-            () => zoomMap(.25)
-        );
-
-
-    $("mapZoomOut")
-        ?.addEventListener(
-            "click",
-            () => zoomMap(-.25)
-        );
-
 
     $("menuGameButton")
         ?.addEventListener(
@@ -2883,30 +3018,23 @@ function setupEvents() {
             openPause
         );
 
-
     $("resumeButton")
         ?.addEventListener(
             "click",
             resumeGame
         );
 
-
     $("pauseSettingsButton")
         ?.addEventListener(
             "click",
             () => {
 
-                hide(
-                    "pauseScreen"
-                );
+                hide("pauseScreen");
 
-                show(
-                    "settingsScreen"
-                );
+                show("settingsScreen");
 
             }
         );
-
 
     $("exitGameButton")
         ?.addEventListener(
@@ -2914,13 +3042,11 @@ function setupEvents() {
             exitGame
         );
 
-
     $("enterVehicleButton")
         ?.addEventListener(
             "click",
             enterVehicle
         );
-
 
     $("exitVehicleButton")
         ?.addEventListener(
@@ -2928,15 +3054,15 @@ function setupEvents() {
             exitVehicle
         );
 
-
-    /* ADRESSE */
+    /*
+       RECHERCHE D'ADRESSE
+    */
 
     $("searchAddressButton")
         ?.addEventListener(
             "click",
             searchAddress
         );
-
 
     $("addressInput")
         ?.addEventListener(
@@ -2955,46 +3081,54 @@ function setupEvents() {
             }
         );
 
-
-    /*
-       Recherche aussi après une petite pause
-       quand l'utilisateur arrête d'écrire.
-    */
-
-    $("addressInput")
-        ?.addEventListener(
-            "input",
-            () => {
-
-                clearTimeout(
-                    addressSearchTimer
-                );
-
-                addressSearchTimer =
-                    setTimeout(
-                        () => {
-
-                            const value =
-                                $("addressInput")
-                                    .value
-                                    .trim();
-
-                            if (
-                                value.length >= 4
-                            ) {
-
-                                searchAddress();
-
-                            }
-
-                        },
-                        1000
-                    );
-
-            }
-        );
-
 }
+
+
+/* =========================================================
+   CLAVIER
+========================================================= */
+
+document.addEventListener(
+    "keydown",
+    event => {
+
+        if (
+            event.key ===
+            "Enter" &&
+            !$("authScreen")
+                ?.classList
+                .contains("hidden")
+        ) {
+
+            loginAccount();
+
+        }
+
+        if (
+            event.key ===
+            "Escape"
+        ) {
+
+            if (
+                $("mapScreen") &&
+                !$("mapScreen")
+                    .classList
+                    .contains("hidden")
+            ) {
+
+                closeMap();
+
+                return;
+            }
+
+            if (gameStarted) {
+                openPause();
+            }
+
+        }
+
+    }
+);
 
 
 /* =========================================================
@@ -3008,35 +3142,26 @@ function init() {
     );
 
     /*
-       On cache les écrans secondaires.
+       Tous les écrans cachés
     */
 
-    document
-        .querySelectorAll(
-            ".screen"
-        )
-        .forEach(
-            screen => {
+    [
+        "authScreen",
+        "mainMenu",
+        "multiplayerScreen",
+        "privateRoomScreen",
+        "roomScreen",
+        "friendsScreen",
+        "garageScreen",
+        "shopScreen",
+        "settingsScreen",
+        "usernameScreen",
+        "gameHud",
+        "mapScreen",
+        "pauseScreen"
+    ].forEach(hide);
 
-                if (
-                    screen.id !==
-                    "loadingScreen"
-                ) {
-
-                    screen.classList.add(
-                        "hidden"
-                    );
-
-                }
-
-            }
-        );
-
-
-    show(
-        "loadingScreen"
-    );
-
+    show("loadingScreen");
 
     setupEvents();
 
@@ -3044,122 +3169,29 @@ function init() {
 
     setupJoystick();
 
-    setupDriveControls();
-
     setupMapTouch();
 
-
     /*
-       Le chargement est indépendant
-       du serveur Render.
+       Chargement local rapide.
     */
 
     startLoading();
 
-
     /*
-       Connexion en arrière-plan.
+       Connexion serveur en arrière-plan.
+       Elle ne bloque PLUS le chargement.
     */
 
     setTimeout(
         connectServer,
-        300
+        200
     );
 
 }
 
 
 /* =========================================================
-   REDIMENSIONNEMENT
-========================================================= */
-
-window.addEventListener(
-    "resize",
-    () => {
-
-        if (
-            $("mapScreen") &&
-            !$("mapScreen")
-                .classList
-                .contains("hidden")
-        ) {
-
-            drawMap();
-
-        }
-
-    }
-);
-
-
-/* =========================================================
-   CLAVIER
-========================================================= */
-
-document.addEventListener(
-    "keydown",
-    event => {
-
-        if (
-            event.key ===
-            "Enter"
-        ) {
-
-            const auth =
-                $("authScreen");
-
-            if (
-                auth &&
-                !auth.classList
-                    .contains(
-                        "hidden"
-                    )
-            ) {
-
-                loginAccount();
-
-            }
-
-        }
-
-
-        if (
-            event.key ===
-            "Escape"
-        ) {
-
-            const map =
-                $("mapScreen");
-
-            if (
-                map &&
-                !map.classList
-                    .contains(
-                        "hidden"
-                    )
-            ) {
-
-                closeMap();
-
-                return;
-
-            }
-
-
-            if (gameStarted) {
-
-                openPause();
-
-            }
-
-        }
-
-    }
-);
-
-
-/* =========================================================
-   LANCEMENT
+   START
 ========================================================= */
 
 if (
