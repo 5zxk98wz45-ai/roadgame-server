@@ -2,23 +2,21 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-
     <meta
         name="viewport"
-        content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     >
 
-    <title>RoadGame V4</title>
+    <title>RoadGame</title>
 
-    <!-- OpenStreetMap / Leaflet -->
+    <!-- Leaflet / OpenStreetMap -->
     <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIINfQ3zZ0nN6Z4f2n3g3D1cJ7vK3Xj0s4Q="
-        crossorigin=""
     >
 
     <style>
+
         * {
             box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
@@ -31,19 +29,23 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background: #080b10;
-            color: white;
             font-family: Arial, sans-serif;
+            background: #101318;
+            color: white;
         }
 
         button,
         input {
-            font: inherit;
+            font-family: inherit;
         }
 
         button {
-            border: 0;
             cursor: pointer;
+            border: 0;
+        }
+
+        .hidden {
+            display: none !important;
         }
 
         .screen {
@@ -51,13 +53,33 @@
             inset: 0;
             width: 100%;
             height: 100%;
-            background: #080b10;
             overflow-y: auto;
-            z-index: 10;
+            background:
+                radial-gradient(
+                    circle at top,
+                    #263746,
+                    #101318 65%
+                );
         }
 
-        .hidden {
-            display: none !important;
+        .menuContainer {
+            width: min(92%, 520px);
+            margin: 0 auto;
+            padding: 35px 0 60px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 38px;
+            margin: 10px 0 5px;
+        }
+
+        h2 {
+            margin: 10px 0 25px;
+        }
+
+        h3 {
+            margin-top: 0;
         }
 
         /* =========================
@@ -71,316 +93,178 @@
             text-align: center;
         }
 
-        .loadingBox {
-            width: min(90%, 420px);
+        .loadingContainer {
+            width: 85%;
+            max-width: 420px;
         }
 
-        .logo {
-            font-size: 42px;
-            font-weight: 900;
-            margin-bottom: 12px;
-        }
-
-        .logo span {
-            color: #20e875;
-        }
-
-        #loadingText {
-            color: #aaa;
-            margin: 15px 0;
-        }
-
-        .loadingBar {
-            width: 100%;
-            height: 12px;
-            background: #202630;
-            border-radius: 20px;
-            overflow: hidden;
-        }
-
-        #loadingBarFill {
-            width: 0%;
-            height: 100%;
-            background: #20e875;
-            transition: width .2s ease;
-        }
-
-        /* =========================
-           GENERAL
-        ========================= */
-
-        .page {
-            width: min(94%, 600px);
-            margin: auto;
-            padding: 30px 0 60px;
-        }
-
-        .title {
-            font-size: 34px;
-            font-weight: 900;
-            margin-bottom: 8px;
-        }
-
-        .subtitle {
-            color: #9299a5;
-            margin-bottom: 25px;
-        }
-
-        .card {
-            background: #121720;
-            border: 1px solid #252c37;
-            border-radius: 18px;
-            padding: 20px;
+        .loadingLogo {
+            font-size: 60px;
             margin-bottom: 15px;
         }
 
+        .loadingBarBackground {
+            width: 100%;
+            height: 14px;
+            background: #27303a;
+            border-radius: 20px;
+            overflow: hidden;
+            margin-top: 25px;
+        }
+
+        #loadingBar {
+            width: 0%;
+            height: 100%;
+            background: #20c997;
+            border-radius: 20px;
+            transition: width 0.2s ease;
+        }
+
+        #loadingText {
+            margin-top: 15px;
+            color: #cbd5dc;
+        }
+
+        /* =========================
+           INPUTS
+        ========================= */
+
         input {
             width: 100%;
-            height: 52px;
+            padding: 15px;
+            margin: 7px 0;
+            border: 1px solid #3d4854;
             border-radius: 12px;
-            border: 1px solid #303846;
-            background: #0c1016;
+            background: #1d252d;
             color: white;
             outline: none;
-            padding: 0 15px;
-            margin-bottom: 10px;
+            font-size: 16px;
         }
 
         input:focus {
-            border-color: #20e875;
-        }
-
-        .button {
-            width: 100%;
-            min-height: 50px;
-            border-radius: 12px;
-            padding: 12px 16px;
-            margin: 5px 0;
-            color: white;
-            background: #202833;
-            font-weight: 700;
-        }
-
-        .button.primary {
-            background: #20e875;
-            color: #06100a;
-        }
-
-        .button.danger {
-            background: #e83f52;
-        }
-
-        .button:active {
-            transform: scale(.98);
-        }
-
-        .message {
-            min-height: 22px;
-            margin: 10px 0;
-            color: #ff5b68;
-        }
-
-        .backButton {
-            width: auto;
-            padding: 10px 15px;
-            background: #202833;
-            color: white;
-            border-radius: 10px;
-            margin-bottom: 20px;
+            border-color: #20c997;
         }
 
         /* =========================
-           MAIN MENU
+           BOUTONS
         ========================= */
 
-        .welcome {
-            font-size: 20px;
-            color: #20e875;
-            margin-bottom: 25px;
-        }
-
-        .menuGrid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        @media (max-width: 430px) {
-            .menuGrid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* =========================
-           SPAWN / ADDRESS
-        ========================= */
-
-        #spawnMap {
+        .menuButton,
+        .primaryButton,
+        .secondaryButton,
+        .dangerButton {
             width: 100%;
-            height: 320px;
-            border-radius: 15px;
-            overflow: hidden;
-            margin-top: 15px;
-            background: #222;
-        }
-
-        .addressRow {
-            display: flex;
-            gap: 8px;
-        }
-
-        .addressRow input {
-            margin: 0;
-            flex: 1;
-        }
-
-        .addressRow button {
-            width: 110px;
             min-height: 52px;
-            border-radius: 12px;
-            background: #20e875;
-            font-weight: 800;
+            padding: 13px 18px;
+            margin: 7px 0;
+            border-radius: 13px;
+            font-size: 17px;
+            font-weight: bold;
+        }
+
+        .primaryButton {
+            background: #20c997;
+            color: #07120e;
+        }
+
+        .secondaryButton {
+            background: #303b46;
+            color: white;
+        }
+
+        .dangerButton {
+            background: #c0392b;
+            color: white;
+        }
+
+        .menuButton {
+            background: #202a33;
+            color: white;
+        }
+
+        .menuButton:active,
+        .primaryButton:active,
+        .secondaryButton:active,
+        .dangerButton:active {
+            transform: scale(0.98);
+        }
+
+        .fullButton {
+            width: 100%;
+        }
+
+        /* =========================
+           AUTH
+        ========================= */
+
+        .authBox {
+            background: rgba(24, 31, 38, 0.96);
+            padding: 25px;
+            border-radius: 20px;
+            margin-top: 40px;
+        }
+
+        #authMessage,
+        #multiplayerMessage,
+        #privateRoomMessage,
+        #usernameMessage {
+            min-height: 24px;
+            margin: 10px 0;
+        }
+
+        /* =========================
+           ADRESSE
+        ========================= */
+
+        .addressBox {
+            background: rgba(24, 31, 38, 0.96);
+            padding: 18px;
+            border-radius: 18px;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .addressBox h3 {
+            text-align: center;
+            margin-bottom: 12px;
         }
 
         #addressResult {
-            margin-top: 12px;
-            color: #cbd2dc;
-            line-height: 1.4;
-        }
-
-        .coordinates {
-            color: #7d8795;
-            font-size: 13px;
-            margin-top: 5px;
-        }
-
-        /* =========================
-           ROOM
-        ========================= */
-
-        #playersList {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            margin-top: 15px;
-        }
-
-        .playerItem {
-            background: #0c1016;
+            margin-top: 10px;
+            padding: 10px;
             border-radius: 10px;
-            padding: 12px;
+            background: #151b21;
+            color: #cbd5dc;
+            min-height: 20px;
         }
 
         /* =========================
-           GARAGE
+           CARTES / LISTES
         ========================= */
 
-        #garageVehicles,
-        #shopVehicles {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
+        .panel {
+            background: rgba(24, 31, 38, 0.96);
+            padding: 20px;
+            border-radius: 20px;
+            margin: 20px auto;
+            width: min(92%, 600px);
         }
 
-        .vehicleCard {
-            background: #0d1219;
-            border: 1px solid #29313d;
-            color: white;
-            border-radius: 14px;
-            padding: 20px 10px;
-            min-height: 100px;
+        .playerItem,
+        .vehicleCard,
+        .friendItem {
+            background: #202a33;
+            border-radius: 13px;
+            padding: 14px;
+            margin: 8px 0;
         }
 
         .vehicleCard.selected {
-            border-color: #20e875;
-            background: #11251a;
+            outline: 3px solid #20c997;
         }
 
-        /* =========================
-           GAME HUD
-        ========================= */
-
-        #gameHud {
-            position: fixed;
-            inset: 0;
-            z-index: 50;
-            pointer-events: none;
-            background: transparent;
-        }
-
-        .hudTop {
-            position: absolute;
-            top: max(15px, env(safe-area-inset-top));
-            left: 15px;
-            right: 15px;
-            display: flex;
-            justify-content: space-between;
-            pointer-events: auto;
-        }
-
-        .hudBox {
-            background: rgba(5, 8, 12, .8);
-            border: 1px solid rgba(255,255,255,.12);
-            border-radius: 12px;
-            padding: 10px 13px;
-            backdrop-filter: blur(8px);
-        }
-
-        .hudButton {
-            background: rgba(5, 8, 12, .85);
-            color: white;
-            padding: 12px;
-            border-radius: 12px;
-            pointer-events: auto;
-        }
-
-        .controls {
-            position: absolute;
-            left: 15px;
-            right: 15px;
-            bottom: max(20px, env(safe-area-inset-bottom));
-            display: flex;
-            justify-content: space-between;
-            align-items: end;
-        }
-
-        .joystick {
-            width: 125px;
-            height: 125px;
-            border-radius: 50%;
-            background: rgba(255,255,255,.12);
-            border: 2px solid rgba(255,255,255,.2);
-            position: relative;
-            pointer-events: auto;
-            touch-action: none;
-        }
-
-        .joystickStick {
-            width: 55px;
-            height: 55px;
-            border-radius: 50%;
-            background: rgba(255,255,255,.45);
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            margin-left: -27.5px;
-            margin-top: -27.5px;
-        }
-
-        .driveButtons {
-            display: grid;
-            grid-template-columns: 65px 65px;
-            gap: 8px;
-            pointer-events: auto;
-        }
-
-        .driveButtons button {
-            width: 65px;
-            height: 55px;
-            border-radius: 12px;
-            background: rgba(5,8,12,.85);
-            color: white;
-            font-size: 20px;
+        .emptyText {
+            color: #9ba8b4;
         }
 
         /* =========================
@@ -388,51 +272,191 @@
         ========================= */
 
         #mapScreen {
-            z-index: 100;
-            background: #080b10;
+            background: #111;
+            z-index: 1000;
         }
 
-        #gameMap {
+        #map {
             position: absolute;
             inset: 0;
+            width: 100%;
+            height: 100%;
         }
 
-        .mapTop {
+        #mapCanvas {
             position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
             z-index: 500;
-            top: max(15px, env(safe-area-inset-top));
-            left: 15px;
-            right: 15px;
-            display: flex;
-            justify-content: space-between;
             pointer-events: none;
         }
 
-        .mapTop button {
-            pointer-events: auto;
-            background: rgba(5,8,12,.9);
-            color: white;
-            border-radius: 12px;
-            padding: 12px 16px;
+        .mapTopBar {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            z-index: 1500;
+            display: flex;
+            gap: 8px;
         }
 
-        .mapControls {
+        .mapTopBar button {
+            background: rgba(20, 25, 30, 0.9);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 12px;
+        }
+
+        .mapZoomButtons {
             position: absolute;
-            z-index: 500;
             right: 15px;
             bottom: 25px;
+            z-index: 1500;
             display: flex;
             flex-direction: column;
             gap: 8px;
         }
 
-        .mapControls button {
+        .mapZoomButtons button {
             width: 52px;
             height: 52px;
             border-radius: 12px;
-            background: rgba(5,8,12,.9);
+            background: rgba(20, 25, 30, 0.9);
             color: white;
-            font-size: 24px;
+            font-size: 25px;
+        }
+
+        /* =========================
+           GAME HUD
+        ========================= */
+
+        #gameHud {
+            background: #151a1f;
+            z-index: 900;
+        }
+
+        .hudTop {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            display: flex;
+            justify-content: space-between;
+            z-index: 100;
+        }
+
+        .hudBox {
+            background: rgba(15, 20, 25, 0.88);
+            padding: 10px 14px;
+            border-radius: 12px;
+        }
+
+        #gameWorld {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            background:
+                repeating-linear-gradient(
+                    90deg,
+                    #273229 0,
+                    #273229 80px,
+                    #2f3b32 80px,
+                    #2f3b32 160px
+                );
+        }
+
+        .gameRoad {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 40%;
+            height: 25%;
+            background: #34383b;
+        }
+
+        .gameRoadLine {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 50%;
+            border-top: 5px dashed #e5d76e;
+        }
+
+        /* =========================
+           JOYSTICK
+        ========================= */
+
+        #joystick {
+            position: absolute;
+            left: 25px;
+            bottom: 30px;
+            width: 145px;
+            height: 145px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.12);
+            border: 2px solid rgba(255,255,255,0.25);
+            z-index: 300;
+            touch-action: none;
+        }
+
+        #joystickStick {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 62px;
+            height: 62px;
+            margin-left: -31px;
+            margin-top: -31px;
+            border-radius: 50%;
+            background: rgba(32,201,151,0.85);
+        }
+
+        /* =========================
+           CONDUITE
+        ========================= */
+
+        .driveControls {
+            position: absolute;
+            right: 20px;
+            bottom: 25px;
+            z-index: 300;
+            display: grid;
+            grid-template-columns: repeat(2, 70px);
+            gap: 8px;
+        }
+
+        .driveControls button {
+            width: 70px;
+            height: 60px;
+            border-radius: 14px;
+            background: rgba(20,25,30,0.88);
+            color: white;
+            font-size: 20px;
+            touch-action: none;
+        }
+
+        .driveControls button.active {
+            background: #20c997;
+            color: #07120e;
+        }
+
+        .gameButtons {
+            position: absolute;
+            right: 15px;
+            top: 75px;
+            z-index: 300;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        .gameButtons button {
+            background: rgba(20,25,30,0.9);
+            color: white;
+            padding: 11px;
+            border-radius: 11px;
         }
 
         /* =========================
@@ -441,289 +465,285 @@
 
         #notifications {
             position: fixed;
-            z-index: 1000;
-            top: 15px;
+            top: 20px;
             left: 15px;
             right: 15px;
+            z-index: 5000;
             pointer-events: none;
         }
 
         .notification {
-            background: #151c25;
-            border: 1px solid #303946;
-            padding: 13px;
+            background: #202a33;
+            color: white;
+            padding: 13px 15px;
             border-radius: 12px;
             margin-bottom: 8px;
-            box-shadow: 0 8px 30px rgba(0,0,0,.3);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
         }
 
-        /* Leaflet */
-        .leaflet-control-attribution {
-            font-size: 9px !important;
+        /* =========================
+           LEAFLET
+        ========================= */
+
+        .leaflet-control-zoom a {
+            font-size: 24px;
         }
+
+        /* =========================
+           MOBILE
+        ========================= */
+
+        @media (max-width: 600px) {
+
+            h1 {
+                font-size: 32px;
+            }
+
+            .menuContainer {
+                padding-top: 25px;
+            }
+
+            #joystick {
+                width: 125px;
+                height: 125px;
+            }
+
+            .driveControls {
+                grid-template-columns: repeat(2, 62px);
+            }
+
+            .driveControls button {
+                width: 62px;
+                height: 55px;
+            }
+        }
+
     </style>
 </head>
 
 <body>
 
-<!-- =====================================================
-     LOADING
-===================================================== -->
+    <!-- =====================================================
+         NOTIFICATIONS
+    ====================================================== -->
 
-<div id="loadingScreen" class="screen">
-    <div class="loadingBox">
-        <div class="logo">Road<span>Game</span></div>
-        <div id="loadingText">Chargement...</div>
-
-        <div class="loadingBar">
-            <div id="loadingBarFill"></div>
-        </div>
-    </div>
-</div>
+    <div id="notifications"></div>
 
 
-<!-- =====================================================
-     AUTH
-===================================================== -->
+    <!-- =====================================================
+         CHARGEMENT
+    ====================================================== -->
 
-<div id="authScreen" class="screen hidden">
-    <div class="page">
+    <div id="loadingScreen" class="screen">
 
-        <div class="title">RoadGame</div>
-        <div class="subtitle">
-            Connecte-toi pour jouer en multijoueur.
-        </div>
+        <div class="loadingContainer">
 
-        <div class="card">
+            <div class="loadingLogo">
+                🚗
+            </div>
 
-            <input
-                id="usernameInput"
-                type="text"
-                maxlength="20"
-                placeholder="Pseudo"
-                autocomplete="username"
-            >
+            <h1>RoadGame</h1>
 
-            <input
-                id="passwordInput"
-                type="password"
-                placeholder="Mot de passe"
-                autocomplete="current-password"
-            >
+            <p id="loadingText">
+                Chargement... 0%
+            </p>
 
-            <div id="authMessage" class="message"></div>
-
-            <button
-                id="loginButton"
-                class="button primary"
-            >
-                Se connecter
-            </button>
-
-            <button
-                id="registerButton"
-                class="button"
-            >
-                Créer un compte
-            </button>
-
-            <button
-                id="guestButton"
-                class="button"
-            >
-                Jouer en invité
-            </button>
+            <div class="loadingBarBackground">
+                <div id="loadingBar"></div>
+            </div>
 
         </div>
 
     </div>
-</div>
 
 
-<!-- =====================================================
-     MENU PRINCIPAL
-===================================================== -->
+    <!-- =====================================================
+         CONNEXION / COMPTE
+    ====================================================== -->
 
-<div id="mainMenu" class="screen hidden">
-    <div class="page">
+    <div id="authScreen" class="screen hidden">
 
-        <div class="title">RoadGame</div>
+        <div class="menuContainer">
 
-        <div id="welcomeText" class="welcome">
-            Bienvenue
+            <div class="authBox">
+
+                <h1>🚗 RoadGame</h1>
+
+                <h2>Connexion</h2>
+
+                <input
+                    id="usernameInput"
+                    type="text"
+                    maxlength="20"
+                    autocomplete="username"
+                    placeholder="Pseudo"
+                >
+
+                <input
+                    id="passwordInput"
+                    type="password"
+                    autocomplete="current-password"
+                    placeholder="Mot de passe"
+                >
+
+                <button
+                    id="loginButton"
+                    class="primaryButton">
+                    🔑 Se connecter
+                </button>
+
+                <button
+                    id="registerButton"
+                    class="secondaryButton">
+                    🆕 Créer un compte
+                </button>
+
+                <button
+                    id="guestButton"
+                    class="menuButton">
+                    👤 Jouer en invité
+                </button>
+
+                <p id="authMessage"></p>
+
+            </div>
+
         </div>
 
-        <div class="menuGrid">
+    </div>
+
+
+    <!-- =====================================================
+         MENU PRINCIPAL
+    ====================================================== -->
+
+    <div id="mainMenu" class="screen hidden">
+
+        <div class="menuContainer">
+
+            <h1>🚗 RoadGame</h1>
+
+            <h2 id="welcomeText">
+                Bienvenue
+            </h2>
+
+
+            <!-- ADRESSE DE SPAWN -->
+
+            <div class="addressBox">
+
+                <h3>
+                    📍 Où veux-tu apparaître ?
+                </h3>
+
+                <input
+                    id="addressInput"
+                    type="text"
+                    autocomplete="street-address"
+                    placeholder="Ex : Villepinte, France"
+                >
+
+                <button
+                    id="searchAddressButton"
+                    class="primaryButton fullButton">
+                    🔎 Rechercher l'adresse
+                </button>
+
+                <div id="addressResult"></div>
+
+            </div>
+
+
+            <!-- BOUTONS DU MENU -->
 
             <button
                 id="playButton"
-                class="button primary"
-            >
-                🚗 Jouer
-            </button>
-
-            <button
-                id="multiplayerButton"
-                class="button"
-            >
-                🌐 Multijoueur
+                class="menuButton primaryButton">
+                ▶️ Jouer
             </button>
 
             <button
                 id="quickMatchButton"
-                class="button"
-            >
+                class="menuButton">
                 ⚡ Partie rapide
             </button>
 
             <button
+                id="multiplayerButton"
+                class="menuButton">
+                🌐 Multijoueur
+            </button>
+
+            <button
                 id="garageButton"
-                class="button"
-            >
-                🚘 Garage
+                class="menuButton">
+                🚗 Garage
             </button>
 
             <button
                 id="shopButton"
-                class="button"
-            >
-                🛒 Véhicules
+                class="menuButton">
+                🛒 Boutique
             </button>
 
             <button
                 id="friendsButton"
-                class="button"
-            >
+                class="menuButton">
                 👥 Amis
             </button>
 
             <button
                 id="settingsButton"
-                class="button"
-            >
+                class="menuButton">
                 ⚙️ Paramètres
             </button>
 
         </div>
 
     </div>
-</div>
 
 
-<!-- =====================================================
-     SPAWN
-===================================================== -->
+    <!-- =====================================================
+         MULTIJOUEUR
+    ====================================================== -->
 
-<div id="spawnScreen" class="screen hidden">
-    <div class="page">
+    <div
+        id="multiplayerScreen"
+        class="screen hidden">
 
-        <button
-            class="backButton"
-            data-close="spawnScreen"
-        >
-            ← Retour
-        </button>
+        <div class="panel">
 
-        <div class="title">
-            Où veux-tu apparaître ?
-        </div>
+            <h1>🌐 Multijoueur</h1>
 
-        <div class="subtitle">
-            Écris une ville, une adresse ou un lieu.
-        </div>
-
-        <div class="card">
-
-            <div class="addressRow">
-
-                <input
-                    id="addressInput"
-                    type="text"
-                    placeholder="Ex : Tour Eiffel, Paris"
-                    autocomplete="off"
-                >
-
-                <button id="searchAddressButton">
-                    Rechercher
-                </button>
-
-            </div>
-
-            <div id="addressResult">
-                Aucune adresse sélectionnée.
-            </div>
-
-            <div
-                id="coordinatesText"
-                class="coordinates"
-            ></div>
+            <p id="multiplayerMessage"></p>
 
             <button
-                id="spawnHereButton"
-                class="button primary"
-                disabled
-            >
-                📍 Spawn ici
+                id="quickMatchButton2"
+                class="primaryButton">
+                ⚡ Partie rapide
             </button>
 
-        </div>
+            <button
+                id="createRoomButton"
+                class="menuButton">
+                🌐 Créer une partie publique
+            </button>
 
-        <div
-            id="spawnMap"
-        ></div>
+            <button
+                id="createPrivateRoomButton"
+                class="menuButton">
+                🔒 Créer une partie privée
+            </button>
 
-    </div>
-</div>
-
-
-<!-- =====================================================
-     MULTIJOUEUR
-===================================================== -->
-
-<div id="multiplayerScreen" class="screen hidden">
-    <div class="page">
-
-        <button
-            class="backButton"
-            data-close="multiplayerScreen"
-        >
-            ← Retour
-        </button>
-
-        <div class="title">Multijoueur</div>
-
-        <div
-            id="multiplayerMessage"
-            class="message"
-        ></div>
-
-        <button
-            id="quickMatchButton2"
-            class="button primary"
-        >
-            ⚡ Partie rapide
-        </button>
-
-        <button
-            id="createRoomButton"
-            class="button"
-        >
-            🌐 Créer une partie publique
-        </button>
-
-        <button
-            id="createPrivateRoomButton"
-            class="button"
-        >
-            🔒 Créer une partie privée
-        </button>
-
-        <div class="card">
+            <h3>
+                Rejoindre une partie
+            </h3>
 
             <input
                 id="roomCodeInput"
+                type="text"
                 maxlength="6"
-                placeholder="Code de partie"
+                placeholder="Code de la partie"
             >
 
             <input
@@ -734,224 +754,218 @@
 
             <button
                 id="joinRoomButton"
-                class="button primary"
-            >
-                Rejoindre
+                class="primaryButton">
+                🚪 Rejoindre
+            </button>
+
+            <button
+                class="secondaryButton"
+                data-close="multiplayerScreen">
+                ← Retour
             </button>
 
         </div>
 
     </div>
-</div>
 
 
-<!-- =====================================================
-     PARTIE PRIVÉE
-===================================================== -->
+    <!-- =====================================================
+         PARTIE PRIVÉE
+    ====================================================== -->
 
-<div id="privateRoomScreen" class="screen hidden">
-    <div class="page">
+    <div
+        id="privateRoomScreen"
+        class="screen hidden">
 
-        <button
-            class="backButton"
-            data-close="privateRoomScreen"
-        >
-            ← Retour
-        </button>
+        <div class="panel">
 
-        <div class="title">
-            Partie privée
-        </div>
-
-        <div
-            id="privateRoomMessage"
-            class="message"
-        ></div>
-
-        <div class="card">
+            <h1>🔒 Partie privée</h1>
 
             <input
                 id="privatePasswordInput"
                 type="password"
-                placeholder="Mot de passe de la partie"
+                placeholder="Mot de passe"
             >
 
             <button
                 id="confirmPrivateRoomButton"
-                class="button primary"
-            >
-                Créer la partie
+                class="primaryButton">
+                🔒 Créer
+            </button>
+
+            <p id="privateRoomMessage"></p>
+
+            <button
+                class="secondaryButton"
+                data-close="privateRoomScreen">
+                ← Retour
             </button>
 
         </div>
 
     </div>
-</div>
 
 
-<!-- =====================================================
-     ROOM
-===================================================== -->
+    <!-- =====================================================
+         SALLE
+    ====================================================== -->
 
-<div id="roomScreen" class="screen hidden">
-    <div class="page">
+    <div
+        id="roomScreen"
+        class="screen hidden">
 
-        <div class="title">
-            Partie
-        </div>
+        <div class="panel">
 
-        <div class="card">
+            <h1>🚗 Salle</h1>
 
-            <div>
+            <h2>
                 Code :
-                <strong id="currentRoomCode">
+                <span id="currentRoomCode">
                     ------
-                </strong>
-            </div>
+                </span>
+            </h2>
+
+            <h3>
+                Joueurs
+            </h3>
 
             <div id="playersList"></div>
 
             <button
                 id="startRoomButton"
-                class="button primary"
-            >
-                🚗 Commencer
+                class="primaryButton">
+                ▶️ Commencer
             </button>
 
             <button
                 id="leaveRoomButton"
-                class="button danger"
-            >
-                Quitter
+                class="dangerButton">
+                🚪 Quitter
             </button>
 
         </div>
 
     </div>
-</div>
 
 
-<!-- =====================================================
-     GARAGE
-===================================================== -->
+    <!-- =====================================================
+         GARAGE
+    ====================================================== -->
 
-<div id="garageScreen" class="screen hidden">
-    <div class="page">
+    <div
+        id="garageScreen"
+        class="screen hidden">
 
-        <button
-            class="backButton"
-            data-close="garageScreen"
-        >
-            ← Retour
-        </button>
+        <div class="panel">
 
-        <div class="title">Garage</div>
+            <h1>🚗 Garage</h1>
 
-        <div
-            id="selectedVehicleText"
-            class="subtitle"
-        >
-            Véhicule sélectionné
+            <p id="selectedVehicleText">
+                Véhicule sélectionné : 🚗 Voiture
+            </p>
+
+            <div id="garageVehicles"></div>
+
+            <button
+                id="spawnVehicleButton"
+                class="primaryButton">
+                🚗 Utiliser ce véhicule
+            </button>
+
+            <button
+                class="secondaryButton"
+                data-close="garageScreen">
+                ← Retour
+            </button>
+
         </div>
 
-        <div id="garageVehicles"></div>
+    </div>
 
-        <button
-            id="spawnVehicleButton"
-            class="button primary"
-        >
-            Utiliser ce véhicule
-        </button>
+
+    <!-- =====================================================
+         BOUTIQUE
+    ====================================================== -->
+
+    <div
+        id="shopScreen"
+        class="screen hidden">
+
+        <div class="panel">
+
+            <h1>🛒 Boutique</h1>
+
+            <div id="shopVehicles"></div>
+
+            <button
+                class="secondaryButton"
+                data-close="shopScreen">
+                ← Retour
+            </button>
+
+        </div>
 
     </div>
-</div>
 
 
-<!-- =====================================================
-     SHOP
-===================================================== -->
+    <!-- =====================================================
+         AMIS
+    ====================================================== -->
 
-<div id="shopScreen" class="screen hidden">
-    <div class="page">
+    <div
+        id="friendsScreen"
+        class="screen hidden">
 
-        <button
-            class="backButton"
-            data-close="shopScreen"
-        >
-            ← Retour
-        </button>
+        <div class="panel">
 
-        <div class="title">Véhicules</div>
-
-        <div id="shopVehicles"></div>
-
-    </div>
-</div>
-
-
-<!-- =====================================================
-     AMIS
-===================================================== -->
-
-<div id="friendsScreen" class="screen hidden">
-    <div class="page">
-
-        <button
-            class="backButton"
-            data-close="friendsScreen"
-        >
-            ← Retour
-        </button>
-
-        <div class="title">Amis</div>
-
-        <div class="card">
+            <h1>👥 Amis</h1>
 
             <input
                 id="friendUsernameInput"
+                type="text"
                 placeholder="Pseudo du joueur"
             >
 
             <button
                 id="sendFriendRequestButton"
-                class="button primary"
-            >
-                Ajouter
+                class="primaryButton">
+                ➕ Ajouter
+            </button>
+
+            <h3>
+                Demandes
+            </h3>
+
+            <div id="friendRequestsList"></div>
+
+            <h3>
+                Mes amis
+            </h3>
+
+            <div id="friendsList"></div>
+
+            <button
+                class="secondaryButton"
+                data-close="friendsScreen">
+                ← Retour
             </button>
 
         </div>
 
-        <div class="card">
-            <h3>Demandes</h3>
-            <div id="friendRequestsList"></div>
-        </div>
-
-        <div class="card">
-            <h3>Mes amis</h3>
-            <div id="friendsList"></div>
-        </div>
-
     </div>
-</div>
 
 
-<!-- =====================================================
-     PARAMÈTRES
-===================================================== -->
+    <!-- =====================================================
+         PARAMÈTRES
+    ====================================================== -->
 
-<div id="settingsScreen" class="screen hidden">
-    <div class="page">
+    <div
+        id="settingsScreen"
+        class="screen hidden">
 
-        <button
-            class="backButton"
-            data-close="settingsScreen"
-        >
-            ← Retour
-        </button>
+        <div class="panel">
 
-        <div class="title">Paramètres</div>
-
-        <div class="card">
+            <h1>⚙️ Paramètres</h1>
 
             <label>
                 <input
@@ -959,7 +973,7 @@
                     type="checkbox"
                     checked
                 >
-                Sons
+                🔊 Sons
             </label>
 
             <br><br>
@@ -970,231 +984,251 @@
                     type="checkbox"
                     checked
                 >
-                Musique
+                🎵 Musique
             </label>
 
-        </div>
+            <br><br>
 
-        <button
-            id="changeUsernameButton"
-            class="button"
-        >
-            ✏️ Changer de pseudo
-        </button>
-
-        <button
-            id="logoutButton"
-            class="button danger"
-        >
-            Déconnexion
-        </button>
-
-    </div>
-</div>
-
-
-<!-- =====================================================
-     CHANGER PSEUDO
-===================================================== -->
-
-<div id="usernameScreen" class="screen hidden">
-    <div class="page">
-
-        <button
-            class="backButton"
-            data-close="usernameScreen"
-        >
-            ← Retour
-        </button>
-
-        <div class="title">
-            Changer de pseudo
-        </div>
-
-        <input
-            id="newUsernameInput"
-            maxlength="20"
-            placeholder="Nouveau pseudo"
-        >
-
-        <div
-            id="usernameMessage"
-            class="message"
-        ></div>
-
-        <button
-            id="confirmUsernameButton"
-            class="button primary"
-        >
-            Modifier
-        </button>
-
-    </div>
-</div>
-
-
-<!-- =====================================================
-     GAME HUD
-===================================================== -->
-
-<div id="gameHud" class="hidden">
-
-    <div class="hudTop">
-
-        <div class="hudBox">
-            <div id="hudPlayerName">
-                Joueur
-            </div>
-
-            <div id="hudVehicle">
-                car
-            </div>
-        </div>
-
-        <div>
             <button
-                id="mapButton"
-                class="hudButton"
-            >
-                🗺️
+                id="changeUsernameButton"
+                class="menuButton">
+                ✏️ Changer de pseudo
             </button>
 
             <button
-                id="menuGameButton"
-                class="hudButton"
-            >
-                ☰
+                id="logoutButton"
+                class="dangerButton">
+                🚪 Se déconnecter
             </button>
+
+            <button
+                class="secondaryButton"
+                data-close="settingsScreen">
+                ← Retour
+            </button>
+
         </div>
 
     </div>
 
-    <div class="controls">
 
-        <div
-            id="joystick"
-            class="joystick"
-        >
-            <div
-                id="joystickStick"
-                class="joystickStick"
-            ></div>
+    <!-- =====================================================
+         CHANGER PSEUDO
+    ====================================================== -->
+
+    <div
+        id="usernameScreen"
+        class="screen hidden">
+
+        <div class="panel">
+
+            <h1>✏️ Changer de pseudo</h1>
+
+            <input
+                id="newUsernameInput"
+                type="text"
+                maxlength="20"
+                placeholder="Nouveau pseudo"
+            >
+
+            <button
+                id="confirmUsernameButton"
+                class="primaryButton">
+                ✅ Confirmer
+            </button>
+
+            <p id="usernameMessage"></p>
+
+            <button
+                class="secondaryButton"
+                data-close="usernameScreen">
+                ← Retour
+            </button>
+
         </div>
 
-        <div class="driveButtons">
+    </div>
 
-            <button id="accelerateButton">
-                ▲
+
+    <!-- =====================================================
+         JEU
+    ====================================================== -->
+
+    <div
+        id="gameHud"
+        class="screen hidden">
+
+        <div id="gameWorld">
+
+            <div class="gameRoad">
+                <div class="gameRoadLine"></div>
+            </div>
+
+        </div>
+
+
+        <!-- HUD -->
+
+        <div class="hudTop">
+
+            <div class="hudBox">
+                👤
+                <span id="hudPlayerName">
+                    Invité
+                </span>
+            </div>
+
+            <div class="hudBox">
+                🚗
+                <span id="hudVehicle">
+                    car
+                </span>
+            </div>
+
+        </div>
+
+
+        <!-- BOUTONS JEU -->
+
+        <div class="gameButtons">
+
+            <button id="mapButton">
+                🗺️ Carte
             </button>
 
-            <button id="brakeButton">
-                ▼
+            <button id="menuGameButton">
+                ☰ Menu
             </button>
+
+            <button id="enterVehicleButton">
+                🚗 Entrer
+            </button>
+
+            <button id="exitVehicleButton">
+                🚶 Sortir
+            </button>
+
+        </div>
+
+
+        <!-- JOYSTICK -->
+
+        <div id="joystick">
+
+            <div id="joystickStick"></div>
+
+        </div>
+
+
+        <!-- CONTRÔLES -->
+
+        <div class="driveControls">
 
             <button id="leftButton">
-                ◀
+                ◀️
             </button>
 
             <button id="rightButton">
-                ▶
+                ▶️
+            </button>
+
+            <button id="accelerateButton">
+                ⬆️
+            </button>
+
+            <button id="brakeButton">
+                ⬇️
             </button>
 
         </div>
 
     </div>
 
-</div>
 
-
-<!-- =====================================================
-     CARTE
-===================================================== -->
-
-<div id="mapScreen" class="screen hidden">
+    <!-- =====================================================
+         CARTE
+    ====================================================== -->
 
     <div
-        id="gameMap"
-    ></div>
+        id="mapScreen"
+        class="screen hidden">
 
-    <div class="mapTop">
+        <div id="map"></div>
 
-        <button id="closeMapButton">
-            ← Fermer
-        </button>
+        <canvas id="mapCanvas"></canvas>
 
-        <button id="mapCenterButton">
-            📍 Moi
-        </button>
+        <div class="mapTopBar">
 
-    </div>
+            <button id="closeMapButton">
+                ← Fermer
+            </button>
 
-    <div class="mapControls">
-
-        <button id="mapZoomIn">
-            +
-        </button>
-
-        <button id="mapZoomOut">
-            −
-        </button>
-
-    </div>
-
-</div>
-
-
-<!-- =====================================================
-     PAUSE
-===================================================== -->
-
-<div id="pauseScreen" class="screen hidden">
-    <div class="page">
-
-        <div class="title">
-            Pause
         </div>
 
-        <button
-            id="resumeButton"
-            class="button primary"
-        >
-            Continuer
-        </button>
+        <div class="mapZoomButtons">
 
-        <button
-            id="pauseSettingsButton"
-            class="button"
-        >
-            ⚙️ Paramètres
-        </button>
+            <button id="mapZoomIn">
+                +
+            </button>
 
-        <button
-            id="exitGameButton"
-            class="button danger"
-        >
-            Quitter
-        </button>
+            <button id="mapZoomOut">
+                −
+            </button>
+
+        </div>
 
     </div>
-</div>
 
 
-<!-- =====================================================
-     NOTIFICATIONS
-===================================================== -->
+    <!-- =====================================================
+         PAUSE
+    ====================================================== -->
 
-<div id="notifications"></div>
+    <div
+        id="pauseScreen"
+        class="screen hidden">
+
+        <div class="panel">
+
+            <h1>⏸️ Pause</h1>
+
+            <button
+                id="resumeButton"
+                class="primaryButton">
+                ▶️ Reprendre
+            </button>
+
+            <button
+                id="pauseSettingsButton"
+                class="menuButton">
+                ⚙️ Paramètres
+            </button>
+
+            <button
+                id="exitGameButton"
+                class="dangerButton">
+                🚪 Quitter
+            </button>
+
+        </div>
+
+    </div>
 
 
-<!-- Leaflet -->
-<script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-></script>
+    <!-- =====================================================
+         LEAFLET
+    ====================================================== -->
 
-<!-- RoadGame -->
-<script src="game.js"></script>
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+    </script>
+
+
+    <!-- =====================================================
+         GAME.JS
+    ====================================================== -->
+
+    <script src="game.js"></script>
 
 </body>
 </html>
